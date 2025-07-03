@@ -471,8 +471,33 @@ class Unity extends Language
             [
                 'scope'         => 'default',
                 'destination'   => 'Samples~/AppwriteExample/AppwriteExampleScript.cs',
-                'template'      => 'unity/Samples/AppwriteExample/AppwriteExampleScript.cs.twig',
-            ]
+                'template'      => 'unity/Samples~/AppwriteExample/AppwriteExampleScript.cs.twig',
+            ],
+            [
+                'scope'         => 'copy',
+                'destination'   => 'Runtime/Plugins/Microsoft.Bcl.AsyncInterfaces.dll',
+                'template'      => 'unity/Runtime/Plugins/Microsoft.Bcl.AsyncInterfaces.dll',
+            ],
+            [
+                'scope'         => 'copy',
+                'destination'   => 'Runtime/Plugins/System.IO.Pipelines.dll',
+                'template'      => 'unity/Runtime/Plugins/System.IO.Pipelines.dll',
+            ],
+            [
+                'scope'         => 'copy',
+                'destination'   => 'Runtime/Plugins/System.Runtime.CompilerServices.Unsafe.dll',
+                'template'      => 'unity/Runtime/Plugins/System.Runtime.CompilerServices.Unsafe.dll',
+            ],            
+            [
+                'scope'         => 'copy',
+                'destination'   => 'Runtime/Plugins/System.Text.Encodings.Web.dll',
+                'template'      => 'unity/Runtime/Plugins/System.Text.Encodings.Web.dll',
+            ],
+            [
+                'scope'         => 'copy',
+                'destination'   => 'Runtime/Plugins/System.Text.Json.dll',
+                'template'      => 'unity/Runtime/Plugins/System.Text.Json.dll',
+            ],            
         ];
     }
 
