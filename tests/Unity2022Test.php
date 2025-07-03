@@ -13,8 +13,6 @@ class Unity2022Test extends Base
     protected string $class = 'Appwrite\SDK\Language\Unity';
     protected array $build = [
         'mkdir -p tests/sdks/unity/Tests',
-        'mkdir -p tests/sdks/unity/Assets/Plugins/UniTask',
-        'cp -r vendor/cysharp/unitask/src/UniTask/Assets/Plugins/UniTask/* tests/sdks/unity/Assets/Plugins/UniTask/',
         'cp tests/languages/unity/Tests.cs tests/sdks/unity/Tests/Tests.cs',
         'cp tests/languages/unity/Tests.cs.meta tests/sdks/unity/Tests/Tests.cs.meta'
     ];
