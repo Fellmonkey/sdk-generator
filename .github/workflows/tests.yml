@@ -46,6 +46,9 @@ jobs:
           Ruby31,
           AppleSwift56,
           Swift56,
+          Unity2021,
+          Unity2022,
+          Unity2023,
           WebChromium,
           WebNode
         ]

@@ -370,11 +370,6 @@ class Unity extends Language
             ],
             [
                 'scope'         => 'default',
-                'destination'   => 'Runtime/SDK.cs',
-                'template'      => 'unity/Runtime/SDK.cs.twig',
-            ],
-            [
-                'scope'         => 'default',
                 'destination'   => 'Runtime/Realtime.cs',
                 'template'      => 'unity/Runtime/Realtime.cs.twig',
             ],
@@ -472,11 +467,6 @@ class Unity extends Language
                 'scope'         => 'default',
                 'destination'   => 'Runtime/Enums/IEnum.cs',
                 'template'      => 'unity/Runtime/Enums/IEnum.cs.twig',
-            ],
-            [
-                'scope'         => 'default',
-                'destination'   => 'Samples~/AppwriteExample/AppwriteExample.unity',
-                'template'      => 'unity/Samples/AppwriteExample/AppwriteExample.unity.twig',
             ],
             [
                 'scope'         => 'default',
