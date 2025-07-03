@@ -487,7 +487,7 @@ class Unity extends Language
                 'scope'         => 'copy',
                 'destination'   => 'Runtime/Plugins/System.Runtime.CompilerServices.Unsafe.dll',
                 'template'      => 'unity/Runtime/Plugins/System.Runtime.CompilerServices.Unsafe.dll',
-            ],            
+            ],
             [
                 'scope'         => 'copy',
                 'destination'   => 'Runtime/Plugins/System.Text.Encodings.Web.dll',
@@ -497,7 +497,12 @@ class Unity extends Language
                 'scope'         => 'copy',
                 'destination'   => 'Runtime/Plugins/System.Text.Json.dll',
                 'template'      => 'unity/Runtime/Plugins/System.Text.Json.dll',
-            ],            
+            ],
+            [
+                'scope'         => 'copy',
+                'destination'   => 'Runtime/Plugins/UniTask.dll',
+                'template'      => 'unity/Runtime/Plugins/UniTask.dll',
+            ],
         ];
     }
 
