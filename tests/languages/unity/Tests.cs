@@ -19,6 +19,7 @@ namespace AppwriteTests
         public void Setup()
         {
             Debug.Log("Test Started");
+            System.Console.WriteLine("Test Started");
         }
 
         [Test]

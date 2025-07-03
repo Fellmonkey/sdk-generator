@@ -19,7 +19,7 @@ class Unity2022Test extends Base
         'cp tests/languages/unity/Tests.asmdef.meta tests/sdks/unity/Tests/Tests.asmdef.meta'
     ];
     protected string $command =
-        'docker run --network="mockapi" --rm -v $(pwd):/app -w /app/tests/sdks/unity unityci/editor:ubuntu-2022.3.62f1-base-3.1.0 unity-editor -batchmode -quit -runTests -testPlatform EditMode -testResults /app/tests/sdks/unity/test-results.xml -logFile -';
+        'docker run --network="mockapi" --rm -v $(pwd):/app -w /app/tests/sdks/unity unityci/editor:ubuntu-2022.3.62f1-base-3.1.0 unity-editor -batchmode -quit -runTests -testPlatform EditMode -testResults /app/tests/sdks/unity/test-results.xml -logFile /app/tests/sdks/unity/unity-log.txt && cat /app/tests/sdks/unity/unity-log.txt';
 
     protected array $expectedOutput = [
         ...Base::FOO_RESPONSES,
