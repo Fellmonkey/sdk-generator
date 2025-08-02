@@ -1,12 +1,1 @@
-namespace {{ spec.title | caseUcfirst }}
-{
-    public abstract class Service
-    {
-        protected readonly Client _client;
-
-        public Service(Client client)
-        {
-            _client = client;
-        }
-    }
-}
+{% include 'dotnet/shared/Services/Service.cs.twig' %}

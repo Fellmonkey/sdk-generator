@@ -1,8 +1,1 @@
-namespace {{ spec.title | caseUcfirst }}
-{
-    public enum OrderType
-    {
-        ASC, 
-        DESC
-    }
-}
+{% include 'dotnet/shared/Models/OrderType.cs.twig' %}
