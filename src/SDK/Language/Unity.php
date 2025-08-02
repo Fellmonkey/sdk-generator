@@ -669,7 +669,7 @@ class Unity extends Language
     public function getFilters(): array
     {
         return [
-            new TwigFilter('unityComment', function ($value) {
+            new TwigFilter('dotnetComment', function ($value) {
                 $value = explode("\n", $value);
                 foreach ($value as $key => $line) {
                     $value[$key] = "        /// " . wordwrap($line, 75, "\n        /// ");
