@@ -17,7 +17,7 @@ final class {{service.name | caseUcfirst}}Test extends TestCase {
     }
 
 {% for method in service.methods %}
-    public function testMethod{{method.name | caseUcfirst | replace({'-': '', '_': ''})}}(): void {
+    public function test{{method.name | caseUcfirst}}_{{loop.index}}(): void {
         {%~ if method.responseModel and method.responseModel != 'any' ~%}
         $data = array(
             {%- for definition in spec.definitions ~%}{%~ if definition.name == method.responseModel -%}{%~ for property in definition.properties | filter((param) => param.required) ~%}
