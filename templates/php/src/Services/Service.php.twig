@@ -63,7 +63,7 @@ class {{ service.name | caseUcfirst }} extends Service
     {
         $apiPath = str_replace(
             [{% for parameter in method.parameters.path %}'{{ '{' }}{{ parameter.name | caseCamel }}{{ '}' }}'{% if not loop.last %}, {% endif %}{% endfor %}],
-            [{% for parameter in method.parameters.path %}${{ parameter.name | caseCamel | escapeKeyword }}{% if not loop.last %}, {% endif %}{% endfor %}],
+            [{% for parameter in method.parameters.path %}{% if parameter.enumName %}(string) {% endif %}${{ parameter.name | caseCamel | escapeKeyword }}{% if not loop.last %}, {% endif %}{% endfor %}],
             '{{ method.path }}'
         );
 
