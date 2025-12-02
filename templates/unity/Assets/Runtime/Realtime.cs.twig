@@ -142,11 +142,8 @@ namespace {{ spec.title | caseUcfirst }}
             {
                 _channels.Add(channel);
             }
-            
+
             CreateSocket().Forget();
-
-            
-
 
             return subscription;
         }
