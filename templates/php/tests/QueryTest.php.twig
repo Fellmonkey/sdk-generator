@@ -126,7 +126,7 @@ final class QueryTest extends TestCase {
     public function testBetweenWithDoubles(): void {
         $query = json_decode(Query::between('attr', 1.0, 2.0), true);
         $this->assertSame('attr', $query['attribute']);
-        $this->assertSame([1.0, 2.0], $query['values']);
+        $this->assertSame([1, 2], $query['values']);
         $this->assertSame('between', $query['method']);
     }
 
@@ -217,7 +217,7 @@ final class QueryTest extends TestCase {
     public function testNotBetweenWithDoubles(): void {
         $query = json_decode(Query::notBetween('attr', 1.0, 2.0), true);
         $this->assertSame('attr', $query['attribute']);
-        $this->assertSame([1.0, 2.0], $query['values']);
+        $this->assertSame([1, 2], $query['values']);
         $this->assertSame('notBetween', $query['method']);
     }
 
