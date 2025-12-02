@@ -4,10 +4,10 @@
 {% if not parameter.required and not parameter.nullable %}
 
         if (!is_null(${{ parameter.name | caseCamel | escapeKeyword }})) {
-            $apiParams['{{ parameter.name }}'] = ${{ parameter.name | caseCamel | escapeKeyword }};
+            $apiParams['{{ parameter.name }}'] = {% if parameter.enumName %}(string) {% endif %}${{ parameter.name | caseCamel | escapeKeyword }};
         }
 {% else %}
-        $apiParams['{{ parameter.name }}'] = ${{ parameter.name | caseCamel | escapeKeyword }};
+        $apiParams['{{ parameter.name }}'] = {% if parameter.enumName %}(string) {% endif %}${{ parameter.name | caseCamel | escapeKeyword }};
 {% endif %}
 {% endfor %}
 {% endif %}
