@@ -211,6 +211,7 @@ namespace AppwriteTests
             Debug.Log(Query.Select(new List<string> { "name", "age" }));
             Debug.Log(Query.OrderAsc("title"));
             Debug.Log(Query.OrderDesc("title"));
+            Debug.Log(Query.OrderRandom());
             Debug.Log(Query.CursorAfter("my_movie_id"));
             Debug.Log(Query.CursorBefore("my_movie_id"));
             Debug.Log(Query.Limit(50));
