@@ -219,7 +219,7 @@ namespace AppwriteTests
             Debug.Log(Query.Contains("title", "Spider"));
             Debug.Log(Query.Contains("labels", "first"));
 
-             // New query methods
+            // New query methods
             Debug.Log(Query.NotContains("title", "Spider"));
             Debug.Log(Query.NotSearch("name", "john"));
             Debug.Log(Query.NotBetween("age", 50, 100));
@@ -227,9 +227,9 @@ namespace AppwriteTests
             Debug.Log(Query.NotEndsWith("name", "nne"));
             Debug.Log(Query.CreatedBefore("2023-01-01"));
             Debug.Log(Query.CreatedAfter("2023-01-01"));
+            Debug.Log(Query.CreatedBetween("2023-01-01", "2023-12-31"));
             Debug.Log(Query.UpdatedBefore("2023-01-01"));
             Debug.Log(Query.UpdatedAfter("2023-01-01"));
-            Debug.Log(Query.CreatedBetween("2023-01-01", "2023-12-31"));
             Debug.Log(Query.UpdatedBetween("2023-01-01", "2023-12-31"));
             
             // Spatial Distance query tests
