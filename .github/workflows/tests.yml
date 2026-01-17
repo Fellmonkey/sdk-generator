@@ -89,6 +89,13 @@ jobs:
         run: |
           composer test tests/${{ matrix.sdk }}Test.php
 
+      - name: Upload Unity Environment Files
+        if: matrix.sdk == 'Unity2021'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-test-environment-${{ matrix.sdk }}
+          path: tests/sdks/unity/
+
   lint:
     runs-on: ubuntu-latest
 
