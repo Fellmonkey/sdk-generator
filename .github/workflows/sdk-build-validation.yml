@@ -229,6 +229,9 @@ jobs:
                 echo "No tests configured in package.json"
               fi
               ;;
+            cli)
+              bun test || echo "No tests available"
+              ;;
             flutter)
               if [ -d "test" ] && find test -name "*_test.dart" 2>/dev/null | grep -q .; then
                 flutter test
