@@ -293,6 +293,28 @@ namespace AppwriteTests
             Debug.Log(ID.Unique());
             Debug.Log(ID.Custom("custom_id"));
 
+            // Channel helper tests
+            Debug.Log(Channel.database().collection().document().toString());
+            Debug.Log(Channel.database("db1").collection("col1").document("doc1").toString());
+            Debug.Log(Channel.database("db1").collection("col1").document("doc1").create().toString());
+            Debug.Log(Channel.tablesdb().table().row().toString());
+            Debug.Log(Channel.tablesdb("db1").table("table1").row("row1").toString());
+            Debug.Log(Channel.tablesdb("db1").table("table1").row("row1").update().toString());
+            Debug.Log(Channel.account());
+            Debug.Log(Channel.account("user123"));
+            Debug.Log(Channel.bucket().file().toString());
+            Debug.Log(Channel.bucket("bucket1").file("file1").toString());
+            Debug.Log(Channel.bucket("bucket1").file("file1").delete().toString());
+            Debug.Log(Channel.function().execution().toString());
+            Debug.Log(Channel.function("func1").execution("exec1").toString());
+            Debug.Log(Channel.function("func1").execution("exec1").create().toString());
+            Debug.Log(Channel.team().toString());
+            Debug.Log(Channel.team("team1").toString());
+            Debug.Log(Channel.team("team1").create().toString());
+            Debug.Log(Channel.membership().toString());
+            Debug.Log(Channel.membership("membership1").toString());
+            Debug.Log(Channel.membership("membership1").update().toString());
+
             // Operator helper tests
             Debug.Log(Operator.Increment(1));
             Debug.Log(Operator.Increment(5, 100));
