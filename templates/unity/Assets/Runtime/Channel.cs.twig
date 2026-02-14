@@ -91,10 +91,8 @@ namespace {{ spec.title | caseUcfirst }}
             {
                 segment
             };
-            if (!string.IsNullOrWhiteSpace(id))
-            {
-                newSegments.Add(ChannelHelper.Normalize(id));
-            }
+            newSegments.Add(ChannelHelper.Normalize(id));
+
             return new ChannelBuilder(newSegments);
         }
 
