@@ -252,6 +252,7 @@ jobs:
               dart pub get
               osv-scanner scan source --lockfile=pubspec.lock
               dart analyze --no-fatal-warnings
+              dart test
               ;;
             go)
               go mod tidy || true
