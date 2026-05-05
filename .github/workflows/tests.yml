@@ -37,7 +37,7 @@ jobs:
           Node16,
           Node18,
           Node20,
-          PHP80,
+          PHP82,
           PHP83,
           Python39,
           Python310,
@@ -47,6 +47,7 @@ jobs:
           Ruby27,
           Ruby30,
           Ruby31,
+          Rust183,
           AppleSwift56,
           Swift56,
           Unity2021,
@@ -56,7 +57,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -101,7 +102,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup PHP with PECL extension
         uses: shivammathur/setup-php@v2
@@ -120,7 +121,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Make script executable
         run: chmod +x ./.github/scripts/max-line-length.sh

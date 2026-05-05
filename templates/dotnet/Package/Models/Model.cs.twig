@@ -30,7 +30,8 @@ namespace {{ spec.title | caseUcfirst }}.Models
             {%~ if definition.additionalProperties %}
             Dictionary<string, object> data
             {%~ endif %}
-        ) {
+        )
+        {
             {%~ for property in definition.properties %}
             {{ property_name(definition, property) | overrideProperty(definition.name) }} = {{ property.name | caseCamel | escapeKeyword }};
             {%~ endfor %}
