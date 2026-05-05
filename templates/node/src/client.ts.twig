@@ -1,6 +1,47 @@
 import { fetch, FormData, File } from 'node-fetch-native-with-agent';
 import { createAgent } from 'node-fetch-native-with-agent/agent';
 import { Models } from './models';
+import { InputFile } from './inputFile';
+import JSONbigModule from 'json-bigint';
+const JSONbigParser = JSONbigModule({ storeAsString: false });
+const JSONbigSerializer = JSONbigModule({ useNativeBigInt: true });
+
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
+const MAX_INT64 = BigInt('9223372036854775807');
+const MIN_INT64 = BigInt('-9223372036854775808');
+
+function isBigNumber(value: any): boolean {
+    return value !== null
+        && typeof value === 'object'
+        && value._isBigNumber === true
+        && typeof value.isInteger === 'function'
+        && typeof value.toFixed === 'function'
+        && typeof value.toNumber === 'function';
+}
+
+function reviver(_key: string, value: any): any {
+    if (isBigNumber(value)) {
+        if (value.isInteger()) {
+            const str = value.toFixed();
+            const bi = BigInt(str);
+            if (bi >= MIN_SAFE && bi <= MAX_SAFE) {
+                return Number(str);
+            }
+            if (bi >= MIN_INT64 && bi <= MAX_INT64) {
+                return bi;
+            }
+            return value.toNumber();
+        }
+        return value.toNumber();
+    }
+    return value;
+}
+
+const JSONbig = {
+    parse: (text: string) => JSONbigParser.parse(text, reviver),
+    stringify: JSONbigSerializer.stringify
+};
 
 type Payload = {
     [key: string]: any;
@@ -96,6 +137,10 @@ class Client {
      * @returns {this}
      */
     setEndpoint(endpoint: string): this {
+        if (!endpoint || typeof endpoint !== 'string') {
+            throw new {{spec.title | caseUcfirst}}Exception('Endpoint must be a valid string');
+        }
+
         if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
             throw new {{spec.title | caseUcfirst}}Exception('Invalid endpoint URL: ' + endpoint);
         }
@@ -136,6 +181,18 @@ class Client {
         return this;
     }
 
+    /**
+     * Get Headers
+     *
+     * Returns a copy of the current request headers, including any
+     * authentication headers. Handle with care.
+     *
+     * @returns {Headers}
+     */
+    getHeaders(): Headers {
+        return { ...this.headers };
+    }
+
     {%~ for header in spec.global.headers %}
     /**
      * Set {{header.key | caseUcfirst}}
@@ -173,7 +230,7 @@ class Client {
         } else {
             switch (headers['content-type']) {
                 case 'application/json':
-                    options.body = JSON.stringify(params);
+                    options.body = JSONbig.stringify(params);
                     break;
 
                 case 'multipart/form-data':
@@ -201,10 +258,58 @@ class Client {
     }
 
     async chunkedUpload(method: string, url: URL, headers: Headers = {}, originalPayload: Payload = {}, onProgress: (progress: UploadProgress) => void) {
-        const [fileParam, file] = Object.entries(originalPayload).find(([_, value]) => value instanceof File) ?? [];
+        const [fileParam, file] = Object.entries(originalPayload).find(
+            ([_, value]) => value instanceof File || value instanceof InputFile
+        ) ?? [];
 
         if (!file || !fileParam) {
             throw new Error('File not found in payload');
+        }
+
+        if (file instanceof InputFile) {
+            const size = await file.size();
+
+            if (size <= Client.CHUNK_SIZE) {
+                const payload = { ...originalPayload };
+                payload[fileParam] = await file.toFile();
+                return await this.call(method, url, headers, payload);
+            }
+
+            let start = 0;
+            let response = null;
+
+            while (start < size) {
+                let end = start + Client.CHUNK_SIZE;
+                if (end >= size) {
+                    end = size;
+                }
+
+                headers['content-range'] = `bytes ${start}-${end - 1}/${size}`;
+                const chunk = await file.slice(start, end);
+
+                const payload = { ...originalPayload };
+                payload[fileParam] = new File([chunk], file.filename);
+
+                response = await this.call(method, url, headers, payload);
+
+                if (onProgress && typeof onProgress === 'function') {
+                    onProgress({
+                        $id: response.$id,
+                        progress: Math.round((end / size) * 100),
+                        sizeUploaded: end,
+                        chunksTotal: Math.ceil(size / Client.CHUNK_SIZE),
+                        chunksUploaded: Math.ceil(end / Client.CHUNK_SIZE)
+                    });
+                }
+
+                if (response && response.$id) {
+                    headers['x-{{spec.title | caseLower }}-id'] = response.$id;
+                }
+
+                start = end;
+            }
+
+            return response;
         }
 
         if (file.size <= Client.CHUNK_SIZE) {
@@ -280,7 +385,7 @@ class Client {
         }
 
         if (response.headers.get('content-type')?.includes('application/json')) {
-            data = await response.json();
+            data = JSONbig.parse(await response.text());
         } else if (responseType === 'arrayBuffer') {
             data = await response.arrayBuffer();
         } else {
@@ -292,11 +397,15 @@ class Client {
         if (400 <= response.status) {
             let responseText = '';
             if (response.headers.get('content-type')?.includes('application/json') || responseType === 'arrayBuffer') {
-                responseText = JSON.stringify(data);
+                responseText = JSONbig.stringify(data);
             } else {
                 responseText = data?.message;
             }
             throw new {{spec.title | caseUcfirst}}Exception(data?.message, response.status, data?.type, responseText);
+        }
+
+        if (data && typeof data === 'object') {
+            data.toString = () => JSONbig.stringify(data);
         }
 
         return data;

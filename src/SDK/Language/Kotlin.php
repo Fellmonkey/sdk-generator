@@ -99,6 +99,21 @@ class Kotlin extends Language
         return [];
     }
 
+    public function getStaticAccessOperator(): string
+    {
+        return '.';
+    }
+
+    public function getStringQuote(): string
+    {
+        return '"';
+    }
+
+    public function getArrayOf(string $elements): string
+    {
+        return 'listOf(' . $elements . ')';
+    }
+
     /**
      * @param array $parameter
      * @param array $spec
@@ -106,11 +121,29 @@ class Kotlin extends Language
      */
     public function getTypeName(array $parameter, array $spec = []): string
     {
+        if (
+            ($parameter['type'] ?? null) === self::TYPE_ARRAY
+            && (isset($parameter['enumName']) || !empty($parameter['enumValues']))
+        ) {
+            $enumType = isset($parameter['enumName'])
+                ? \ucfirst($parameter['enumName'])
+                : \ucfirst($parameter['name']);
+
+            return 'List<io.appwrite.enums.' . $enumType . '>';
+        }
+
         if (isset($parameter['enumName'])) {
             return 'io.appwrite.enums.' . \ucfirst($parameter['enumName']);
         }
         if (!empty($parameter['enumValues'])) {
             return 'io.appwrite.enums.' . \ucfirst($parameter['name']);
+        }
+        if (!empty($parameter['array']['model'])) {
+            return 'List<io.appwrite.models.' . $this->toPascalCase($parameter['array']['model']) . '>';
+        }
+        if (!empty($parameter['model'])) {
+            $modelType = 'io.appwrite.models.' . $this->toPascalCase($parameter['model']);
+            return $parameter['type'] === self::TYPE_ARRAY ? 'List<' . $modelType . '>' : $modelType;
         }
         if (isset($parameter['items'])) {
             $parameter['array'] = $parameter['items'];
@@ -190,9 +223,10 @@ class Kotlin extends Language
 
     /**
      * @param array $param
+     * @param string $lang Language variant: 'kotlin' (default) or 'java'
      * @return string
      */
-    public function getParamExample(array $param): string
+    public function getParamExample(array $param, string $lang = 'kotlin'): string
     {
         $type       = $param['type'] ?? '';
         $example    = $param['example'] ?? '';
@@ -215,10 +249,12 @@ class Kotlin extends Language
                     $output .= "\"\"";
                     break;
                 case self::TYPE_OBJECT:
-                    $output .= 'mapOf( "a" to "b" )';
+                    $output .= $lang === 'java'
+                        ? 'Map.of("a", "b")'
+                        : 'mapOf( "a" to "b" )';
                     break;
                 case self::TYPE_ARRAY:
-                    $output .= 'listOf()';
+                    $output .= $lang === 'java' ? 'List.of()' : 'listOf()';
                     break;
             }
         } else {
@@ -226,29 +262,15 @@ class Kotlin extends Language
                 case self::TYPE_OBJECT:
                     $decoded = json_decode($example, true);
                     if ($decoded && is_array($decoded)) {
-                        $mapEntries = [];
-                        foreach ($decoded as $key => $value) {
-                            $formattedKey = '"' . $key . '"';
-                            if (is_string($value)) {
-                                $formattedValue = '"' . $value . '"';
-                            } elseif (is_bool($value)) {
-                                $formattedValue = $value ? 'true' : 'false';
-                            } elseif (is_null($value)) {
-                                $formattedValue = 'null';
-                            } elseif (is_array($value)) {
-                                $formattedValue = 'listOf()'; // Simplified for nested arrays
-                            } else {
-                                $formattedValue = (string)$value;
-                            }
-                            $mapEntries[] = '        ' . $formattedKey . ' to ' . $formattedValue;
-                        }
-                        if (count($mapEntries) > 0) {
-                            $output .= "mapOf(\n" . implode(",\n", $mapEntries) . "\n    )";
+                        if ($lang === 'java') {
+                            $output .= $this->getJavaMapExample($decoded);
                         } else {
-                            $output .= 'mapOf( "a" to "b" )';
+                            $output .= $this->getKotlinMapExample($decoded);
                         }
                     } else {
-                        $output .= 'mapOf( "a" to "b" )';
+                        $output .= $lang === 'java'
+                            ? 'Map.of("a", "b")'
+                            : 'mapOf( "a" to "b" )';
                     }
                     break;
                 case self::TYPE_FILE:
@@ -257,13 +279,11 @@ class Kotlin extends Language
                     $output .= $example;
                     break;
                 case self::TYPE_ARRAY:
-                    if (\str_starts_with($example, '[')) {
-                        $example = \substr($example, 1);
+                    if ($this->isPermissionString($example)) {
+                        $output .= $this->getPermissionExample($example, $lang);
+                    } else {
+                        $output .= $this->getArrayExample($example, $lang);
                     }
-                    if (\str_ends_with($example, ']')) {
-                        $example = \substr($example, 0, -1);
-                    }
-                    $output .= 'listOf(' . $example . ')';
                     break;
                 case self::TYPE_BOOLEAN:
                     $output .= ($example) ? 'true' : 'false';
@@ -275,6 +295,190 @@ class Kotlin extends Language
         }
 
         return $output;
+    }
+
+    /**
+     * Generate Kotlin-style map initialization
+     *
+     * @param array $data
+     * @param int $indentLevel Indentation level for nested maps
+     * @return string
+     */
+    protected function getKotlinMapExample(array $data, int $indentLevel = 0): string
+    {
+        $mapEntries = [];
+        $baseIndent = str_repeat('    ', $indentLevel + 2);
+
+        foreach ($data as $key => $value) {
+            $formattedKey = '"' . $key . '"';
+            if (is_string($value)) {
+                $formattedValue = '"' . $value . '"';
+            } elseif (is_bool($value)) {
+                $formattedValue = $value ? 'true' : 'false';
+            } elseif (is_null($value)) {
+                $formattedValue = 'null';
+            } elseif (is_array($value)) {
+                // Check if it's an associative array (object) or indexed array
+                $isObject = !array_is_list($value);
+                if ($isObject) {
+                    $formattedValue = $this->getKotlinMapExample($value, $indentLevel + 1);
+                } else {
+                    $formattedValue = $this->getArrayExample(json_encode($value), 'kotlin');
+                }
+            } else {
+                $formattedValue = (string)$value;
+            }
+            $mapEntries[] = $baseIndent . $formattedKey . ' to ' . $formattedValue;
+        }
+
+        if (count($mapEntries) > 0) {
+            $closeIndent = str_repeat('    ', $indentLevel + 1);
+            return "mapOf(\n" . implode(",\n", $mapEntries) . "\n" . $closeIndent . ")";
+        } else {
+            return 'mapOf( "a" to "b" )';
+        }
+    }
+
+    /**
+     * Generate Java-style map initialization using Map.of()
+     *
+     * @param array $data
+     * @param int $indentLevel Indentation level for nested maps
+     * @return string
+     */
+    protected function getJavaMapExample(array $data, int $indentLevel = 0): string
+    {
+        $mapEntries = [];
+        $baseIndent = str_repeat('    ', $indentLevel + 2);
+
+        foreach ($data as $key => $value) {
+            $formattedKey = '"' . $key . '"';
+            if (is_string($value)) {
+                $formattedValue = '"' . $value . '"';
+            } elseif (is_bool($value)) {
+                $formattedValue = $value ? 'true' : 'false';
+            } elseif (is_null($value)) {
+                $formattedValue = 'null';
+            } elseif (is_array($value)) {
+                // Check if it's an associative array (object) or indexed array
+                $isObject = !array_is_list($value);
+                if ($isObject) {
+                    $formattedValue = $this->getJavaMapExample($value, $indentLevel + 1);
+                } else {
+                    $formattedValue = $this->getArrayExample(json_encode($value), 'java');
+                }
+            } else {
+                $formattedValue = (string)$value;
+            }
+            $mapEntries[] = $baseIndent . $formattedKey . ', ' . $formattedValue;
+        }
+
+        if (count($mapEntries) > 0) {
+            $closeIndent = str_repeat('    ', $indentLevel + 1);
+            return "Map.of(\n" . implode(",\n", $mapEntries) . "\n" . $closeIndent . ")";
+        } else {
+            return 'Map.of("a", "b")';
+        }
+    }
+
+    /**
+     * Generate array example for the given language
+     *
+     * @param string $example Array example like '[1, 2, 3]' or '[{"key": "value"}]'
+     * @param string $lang Language variant: 'kotlin' or 'java'
+     * @return string
+     */
+    protected function getArrayExample(string $example, string $lang = 'kotlin'): string
+    {
+        // Try to decode as JSON to handle arrays of objects
+        $decoded = json_decode($example, true);
+        if ($decoded && is_array($decoded)) {
+            $arrayItems = [];
+            foreach ($decoded as $item) {
+                if (is_array($item)) {
+                    // Check if it's an associative array (object) or indexed array (nested array)
+                    $isObject = !array_is_list($item);
+
+                    if ($isObject) {
+                        // It's an object/map, convert it
+                        if ($lang === 'java') {
+                            $arrayItems[] = $this->getJavaMapExample($item);
+                        } else {
+                            $arrayItems[] = $this->getKotlinMapExample($item);
+                        }
+                    } else {
+                        // It's a nested array, recursively convert it
+                        $arrayItems[] = $this->getArrayExample(json_encode($item), $lang);
+                    }
+                } else {
+                    // Primitive value
+                    if (is_string($item)) {
+                        $arrayItems[] = '"' . $item . '"';
+                    } elseif (is_bool($item)) {
+                        $arrayItems[] = $item ? 'true' : 'false';
+                    } elseif (is_null($item)) {
+                        $arrayItems[] = 'null';
+                    } else {
+                        $arrayItems[] = (string)$item;
+                    }
+                }
+            }
+            return $lang === 'java'
+                ? 'List.of(' . implode(', ', $arrayItems) . ')'
+                : 'listOf(' . implode(', ', $arrayItems) . ')';
+        }
+
+        // Fallback to old behavior for non-JSON arrays
+        if (\str_starts_with($example, '[')) {
+            $example = \substr($example, 1);
+        }
+        if (\str_ends_with($example, ']')) {
+            $example = \substr($example, 0, -1);
+        }
+        return $lang === 'java'
+            ? 'List.of(' . $example . ')'
+            : 'listOf(' . $example . ')';
+    }
+
+    /**
+     * Generate permission example for the given language
+     *
+     * @param string $example Permission string like '["read(\"any\")"]'
+     * @param string $lang Language variant: 'kotlin' or 'java'
+     * @return string
+     */
+    public function getPermissionExample(string $example, string $lang = 'kotlin'): string
+    {
+        $permissions = [];
+        $staticOp = $this->getStaticAccessOperator();
+        $quote = $this->getStringQuote();
+        $prefix = $this->getPermissionPrefix();
+
+        foreach ($this->extractPermissionParts($example) as $permission) {
+            $args = [];
+            if ($permission['id'] !== null) {
+                $args[] = $quote . $permission['id'] . $quote;
+            }
+            if ($permission['innerRole'] !== null) {
+                $args[] = $quote . $permission['innerRole'] . $quote;
+            }
+            $argsString = implode(', ', $args);
+
+            $action = $permission['action'];
+            $role = $permission['role'];
+            $action = $this->transformPermissionAction($action);
+            $role = $this->transformPermissionRole($role);
+
+            $permissions[] = $prefix . 'Permission' . $staticOp . $action . '(' . $prefix . 'Role' . $staticOp . $role . '(' . $argsString . '))';
+        }
+
+        $permissionsString = implode(', ', $permissions);
+
+        // For Java, use List.of() instead of listOf()
+        if ($lang === 'java') {
+            return 'List.of(' . $permissionsString . ')';
+        }
+        return 'listOf(' . $permissionsString . ')';
     }
 
     /**
@@ -396,6 +600,11 @@ class Kotlin extends Language
             ],
             [
                 'scope'         => 'default',
+                'destination'   => '/src/main/kotlin/{{ sdk.namespace | caseSlash }}/Operator.kt',
+                'template'      => '/kotlin/src/main/kotlin/io/appwrite/Operator.kt.twig',
+            ],
+            [
+                'scope'         => 'default',
                 'destination'   => '/src/main/kotlin/{{ sdk.namespace | caseSlash }}/coroutines/Callback.kt',
                 'template'      => '/kotlin/src/main/kotlin/io/appwrite/coroutines/Callback.kt.twig',
             ],
@@ -441,6 +650,11 @@ class Kotlin extends Language
                 'template'      => '/kotlin/src/main/kotlin/io/appwrite/models/Model.kt.twig',
             ],
             [
+                'scope'         => 'requestModel',
+                'destination'   => '/src/main/kotlin/{{ sdk.namespace | caseSlash }}/models/{{ requestModel.name | caseUcfirst }}.kt',
+                'template'      => '/kotlin/src/main/kotlin/io/appwrite/models/RequestModel.kt.twig',
+            ],
+            [
                 'scope'         => 'enum',
                 'destination'   => '/src/main/kotlin/{{ sdk.namespace | caseSlash }}/enums/{{ enum.name | caseUcfirst }}.kt',
                 'template'      => '/kotlin/src/main/kotlin/io/appwrite/enums/Enum.kt.twig',
@@ -469,7 +683,77 @@ class Kotlin extends Language
                 }
                 return $this->toUpperSnakeCase($value);
             }),
+            new TwigFilter('propertyAssignment', function (array $property, array $spec) {
+                return $this->getPropertyAssignment($property, $spec);
+            }),
+            new TwigFilter('javaParamExample', function (array $param) {
+                return $this->getParamExample($param, 'java');
+            }, ['is_safe' => ['html']]),
+            new TwigFilter('enumExample', function (array $param, string $lang = 'kotlin') {
+                return $this->getEnumExample($param, $lang);
+            }),
+            new TwigFilter('javaEnumExample', function (array $param) {
+                return $this->getEnumExample($param, 'java');
+            }),
         ];
+    }
+
+    /**
+     * Generate enum example for Kotlin/Java
+     *
+     * @param array $param
+     * @param string $lang 'kotlin' or 'java'
+     * @return string
+     */
+    protected function getEnumExample(array $param, string $lang = 'kotlin'): string
+    {
+        $enumValues = $param['enumValues'] ?? [];
+        if (empty($enumValues)) {
+            return '';
+        }
+
+        $enumKeys = $param['enumKeys'] ?? [];
+        $enumName = $this->toPascalCase($param['enumName'] ?? $param['name'] ?? '');
+        $example = $param['example'] ?? null;
+        $isArray = ($param['type'] ?? '') === self::TYPE_ARRAY;
+
+        $resolveKey = function ($value) use ($enumValues, $enumKeys) {
+            $index = array_search($value, $enumValues, true);
+            if ($index !== false && isset($enumKeys[$index]) && $enumKeys[$index] !== '') {
+                return $this->toUpperSnakeCase($enumKeys[$index]);
+            }
+            if ($index !== false && isset($enumValues[$index])) {
+                return $this->toUpperSnakeCase($enumValues[$index]);
+            }
+            $fallback = $enumKeys[0] ?? $enumValues[0] ?? $value;
+            return $this->toUpperSnakeCase((string)$fallback);
+        };
+
+        if ($isArray) {
+            $values = [];
+            if (\is_string($example) && $example !== '') {
+                $decoded = json_decode($example, true);
+                if (\is_array($decoded)) {
+                    $values = $decoded;
+                }
+            } elseif (\is_array($example)) {
+                $values = $example;
+            }
+
+            if (empty($values)) {
+                $values = [$enumValues[0]];
+            }
+
+            $items = array_map(function ($value) use ($enumName, $resolveKey) {
+                return $enumName . '.' . $resolveKey($value);
+            }, $values);
+
+            $listOf = $lang === 'java' ? 'List.of' : 'listOf';
+            return $listOf . '(' . implode(', ', $items) . ')';
+        }
+
+        $value = ($example !== null && $example !== '') ? $example : $enumValues[0];
+        return $enumName . '.' . $resolveKey($value);
     }
 
     protected function getReturnType(array $method, array $spec, string $namespace, string $generic = 'T'): string
@@ -481,6 +765,14 @@ class Kotlin extends Language
             return 'ByteArray';
         }
 
+        if (
+            \array_key_exists('responseModels', $method)
+            && \count($method['responseModels']) > 1
+        ) {
+            return 'Any';
+        }
+
+        // Check for missing or generic response model
         if (
             !\array_key_exists('responseModel', $method)
             || empty($method['responseModel'])
@@ -518,6 +810,9 @@ class Kotlin extends Language
             if ($property['type'] === 'array') {
                 $type = 'List<' . $type . '>';
             }
+        } elseif (isset($property['enum'])) {
+            $enumName = $property['enumName'] ?? $property['name'];
+            $type = \ucfirst($enumName);
         } else {
             $type = $this->getTypeName($property);
         }
@@ -550,5 +845,72 @@ class Kotlin extends Language
         }
 
         return false;
+    }
+
+    /**
+     * Generate property assignment logic for model deserialization
+     *
+     * @param array $property
+     * @param array $spec
+     * @return string
+     */
+    protected function getPropertyAssignment(array $property, array $spec): string
+    {
+        $propertyName = $property['name'];
+        $escapedPropertyName = str_replace('$', '\$', $propertyName);
+        $mapKey = "map[\"$escapedPropertyName\"]";
+
+        // Handle sub-schema (nested objects)
+        if (isset($property['sub_schema']) && !empty($property['sub_schema'])) {
+            $subSchemaClass = $this->toPascalCase($property['sub_schema']);
+            $hasGenericType = $this->hasGenericType($property['sub_schema'], $spec);
+            $nestedTypeParam = $hasGenericType ? ', nestedType' : '';
+
+            if ($property['type'] === 'array') {
+                return "($mapKey as List<Map<String, Any>>).map { " .
+                       "$subSchemaClass.from(map = it$nestedTypeParam) }";
+            } else {
+                return "$subSchemaClass.from(" .
+                       "map = $mapKey as Map<String, Any>$nestedTypeParam" .
+                       ")";
+            }
+        }
+
+        // Handle enum properties
+        if (isset($property['enum']) && !empty($property['enum'])) {
+            $enumName = $property['enumName'] ?? $property['name'];
+            $enumClass = $this->toPascalCase($enumName);
+            $nullCheck = $property['required'] ? '!!' : ' ?: null';
+
+            if ($property['required']) {
+                return "$enumClass.values().find { " .
+                    "it.value == $mapKey as String " .
+                    "}$nullCheck";
+            }
+
+            return "$enumClass.values().find { " .
+                   "it.value == ($mapKey as? String) " .
+                   "}$nullCheck";
+        }
+
+        // Handle primitive types
+        $nullableModifier = $property['required'] ? '' : '?';
+
+        if ($property['type'] === 'integer') {
+            return "($mapKey as$nullableModifier Number)" .
+                   ($nullableModifier ? '?' : '') . '.toLong()';
+        }
+
+        if ($property['type'] === 'number') {
+            return "($mapKey as$nullableModifier Number)" .
+                   ($nullableModifier ? '?' : '') . '.toDouble()';
+        }
+
+        // Handle other types (string, boolean, etc.)
+        $kotlinType = $this->getPropertyType($property, $spec);
+        // Remove nullable modifier from type since we handle it in the cast
+        $kotlinType = str_replace('?', '', $kotlinType);
+
+        return "$mapKey as$nullableModifier $kotlinType";
     }
 }

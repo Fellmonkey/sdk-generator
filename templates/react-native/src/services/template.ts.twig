@@ -3,20 +3,15 @@ import { {{ spec.title | caseUcfirst}}Exception, Client } from '../client';
 import type { Models } from '../models';
 import type { UploadProgress, Payload } from '../client';
 import * as FileSystem from 'expo-file-system';
-import { Platform } from 'react-native';
+import { Platform as RNPlatform } from 'react-native';
 
 {% set added = [] %}
 {% for method in service.methods %}
 {% for parameter in method.parameters.all %}
 {% if parameter.enumValues is not empty %}
-{% if parameter.enumName is not empty %}
-{% set name = parameter.enumName %}
-{% else %}
-{% set name = parameter.name %}
-{% endif %}
-{% if name not in added %}
-import { {{ name | caseUcfirst }} } from '../enums/{{ name | caseKebab }}';
-{% set added = added|merge([name]) %}
+{% if parameter.enumName not in added %}
+import { {{ parameter.enumName | caseUcfirst }} } from '../enums/{{ parameter.enumName | caseKebab }}';
+{% set added = added|merge([parameter.enumName]) %}
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -75,7 +70,7 @@ export class {{ service.name | caseUcfirst }} extends Service {
         let onProgress: ((progress: UploadProgress) => void);
         {%~ endif %}
 
-        if ({% set hasRequired = false %}{% for parameter in method.parameters.all %}{% if parameter.required %}{% set hasRequired = true %}{% endif %}{% endfor %}{% if not hasRequired %}!paramsOrFirst || {% endif %}(paramsOrFirst && typeof paramsOrFirst === 'object' && !Array.isArray(paramsOrFirst){% set firstParamType = method.parameters.all[0] | getPropertyType(method) | raw %}{% if not (firstParamType starts with 'string' or firstParamType starts with 'number' or firstParamType starts with 'boolean') %} && '{{ method.parameters.all[0].name | caseCamel | escapeKeyword }}' in paramsOrFirst{% endif %})) {
+        if ({{ method | getOverloadCondition | raw }}) {
             params = (paramsOrFirst || {}) as { {% for parameter in method.parameters.all %}{{ parameter.name | caseCamel | escapeKeyword }}{% if not parameter.required or parameter.nullable %}?{% endif %}: {{ parameter | getPropertyType(method) | raw }}{% if not loop.last %}, {% endif %}{% endfor %} };
             {%~ if 'multipart/form-data' in method.consumes %}
             onProgress = paramsOrFirst?.onProgress as ((progress: UploadProgress) => void);
@@ -201,7 +196,7 @@ export class {{ service.name | caseUcfirst }} extends Service {
                 length: Service.CHUNK_SIZE
             });
             var path = `data:${{'{'}}{{ parameter.name | caseCamel | escapeKeyword }}.type{{'}'}};base64,${{'{'}}chunk{{'}'}}`;
-            if (Platform.OS.toLowerCase() === 'android') {
+            if (RNPlatform.OS.toLowerCase() === 'android') {
                 path = FileSystem.cacheDirectory + '/tmp_chunk_' + timestamp;
                 await FileSystem.writeAsStringAsync(path, chunk, {encoding: FileSystem.EncodingType.Base64});
             }

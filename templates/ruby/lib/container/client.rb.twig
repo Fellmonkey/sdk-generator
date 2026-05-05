@@ -68,7 +68,6 @@ module {{ spec.title | caseUcfirst }}
             self
         end
 
-
         # Add Header
         #
         # @param [String] key The key for the header to add
@@ -79,6 +78,13 @@ module {{ spec.title | caseUcfirst }}
             @headers[key.downcase] = value
 
             self
+        end
+
+        # Get request headers
+        #
+        # @return [Hash]
+        def get_headers
+            @headers.dup
         end
 
         # Send the HTTP request.

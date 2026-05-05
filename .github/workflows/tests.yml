@@ -6,6 +6,9 @@ concurrency:
 
 on: [pull_request]
 
+env:
+  UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,12 +19,11 @@ jobs:
         sdk: [
           Android5Java17,
           Android14Java17,
-          CLINode16,
-          CLINode18,
+          CLIBun10,
+          CLIBun11,
+          CLIBun13,
           DartBeta,
           DartStable,
-          Deno1193,
-          Deno1303,
           DotNet60,
           DotNet80,
           DotNet90,
@@ -35,7 +37,7 @@ jobs:
           Node16,
           Node18,
           Node20,
-          PHP80,
+          PHP82,
           PHP83,
           Python39,
           Python310,
@@ -45,15 +47,17 @@ jobs:
           Ruby27,
           Ruby30,
           Ruby31,
+          Rust183,
           AppleSwift56,
           Swift56,
+          Unity2021,
           WebChromium,
           WebNode
         ]
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -86,17 +90,24 @@ jobs:
         run: |
           composer test tests/${{ matrix.sdk }}Test.php
 
+      - name: Upload Unity Environment Files
+        if: always() && matrix.sdk == 'Unity2021'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-test-environment-${{ matrix.sdk }}
+          path: tests/sdks/unity/
+
   lint:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup PHP with PECL extension
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ matrix.php-version }}
+          php-version: '8.3'
           extensions: curl
 
       - name: Install
@@ -110,7 +121,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Make script executable
         run: chmod +x ./.github/scripts/max-line-length.sh

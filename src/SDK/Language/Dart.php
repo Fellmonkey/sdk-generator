@@ -121,17 +121,50 @@ class Dart extends Language
         ];
     }
 
+    public function getStaticAccessOperator(): string
+    {
+        return '.';
+    }
+
+    public function getStringQuote(): string
+    {
+        return "'";
+    }
+
+    public function getArrayOf(string $elements): string
+    {
+        return '[' . $elements . ']';
+    }
+
     /**
      * @param array $parameter
      * @return string
      */
     public function getTypeName(array $parameter, array $spec = []): string
     {
+        if (
+            ($parameter['type'] ?? null) === self::TYPE_ARRAY
+            && (isset($parameter['enumName']) || !empty($parameter['enumValues']))
+        ) {
+            $enumType = isset($parameter['enumName'])
+                ? \ucfirst($parameter['enumName'])
+                : \ucfirst($parameter['name']);
+
+            return 'List<enums.' . $enumType . '>';
+        }
+
         if (isset($parameter['enumName'])) {
             return 'enums.' . \ucfirst($parameter['enumName']);
         }
         if (!empty($parameter['enumValues'])) {
             return 'enums.' . \ucfirst($parameter['name']);
+        }
+        if (!empty($parameter['array']['model'])) {
+            return 'List<models.' . $this->toPascalCase($parameter['array']['model']) . '>';
+        }
+        if (!empty($parameter['model'])) {
+            $modelType = 'models.' . $this->toPascalCase($parameter['model']);
+            return $parameter['type'] === self::TYPE_ARRAY ? 'List<' . $modelType . '>' : $modelType;
         }
         if (isset($parameter['items'])) {
             // Map definition nested type to parameter nested type
@@ -219,9 +252,10 @@ class Dart extends Language
 
     /**
      * @param array $param
+     * @param string $lang
      * @return string
      */
-    public function getParamExample(array $param): string
+    public function getParamExample(array $param, string $lang = ''): string
     {
         $type       = $param['type'] ?? '';
         $example    = $param['example'] ?? '';
@@ -240,7 +274,8 @@ class Dart extends Language
         }
 
         return match ($type) {
-            self::TYPE_ARRAY, self::TYPE_FILE, self::TYPE_INTEGER, self::TYPE_NUMBER => $example,
+            self::TYPE_ARRAY => $this->isPermissionString($example) ? $this->getPermissionExample($example) : $example,
+            self::TYPE_FILE, self::TYPE_INTEGER, self::TYPE_NUMBER => $example,
             self::TYPE_BOOLEAN => ($example) ? 'true' : 'false',
             self::TYPE_OBJECT => ($decoded = json_decode($example, true)) !== null
             ? (empty($decoded) && $example === '{}'
@@ -344,6 +379,11 @@ class Dart extends Language
             ],
             [
                 'scope'         => 'default',
+                'destination'   => '/lib/operator.dart',
+                'template'      => 'dart/lib/operator.dart.twig',
+            ],
+            [
+                'scope'         => 'default',
                 'destination'   => '/lib/{{ language.params.packageName }}.dart',
                 'template'      => 'dart/lib/package.dart.twig',
             ],
@@ -403,6 +443,11 @@ class Dart extends Language
                 'template'      => 'dart/lib/src/models/model.dart.twig',
             ],
             [
+                'scope'         => 'requestModel',
+                'destination'   => '/lib/src/models/{{requestModel.name | caseSnake }}.dart',
+                'template'      => 'dart/lib/src/models/request_model.dart.twig',
+            ],
+            [
                 'scope'         => 'method',
                 'destination'   => 'docs/examples/{{service.name | caseLower}}/{{method.name | caseKebab}}.md',
                 'template'      => 'dart/docs/example.md.twig',
@@ -431,6 +476,11 @@ class Dart extends Language
                 'scope'         => 'default',
                 'destination'   => '/test/query_test.dart',
                 'template'      => 'dart/test/query_test.dart.twig',
+            ],
+            [
+                'scope'         => 'default',
+                'destination'   => '/test/operator_test.dart',
+                'template'      => 'dart/test/operator_test.dart.twig',
             ],
             [
                 'scope'         => 'default',
@@ -502,6 +552,54 @@ class Dart extends Language
             }, ['is_safe' => ['html']]),
             new TwigFilter('caseEnumKey', function (string $value) {
                 return $this->toCamelCase($value);
+            }),
+            new TwigFilter('enumExample', function (array $param) {
+                $enumValues = $param['enumValues'] ?? [];
+                if (empty($enumValues)) {
+                    return '';
+                }
+
+                $enumKeys = $param['enumKeys'] ?? [];
+                $enumName = $this->toCamelCase($param['enumName'] ?? $param['name'] ?? '');
+                $example = $param['example'] ?? null;
+                $isArray = ($param['type'] ?? '') === self::TYPE_ARRAY;
+
+                $resolveKey = function ($value) use ($enumValues, $enumKeys) {
+                    $index = array_search($value, $enumValues, true);
+                    if ($index !== false && isset($enumKeys[$index]) && $enumKeys[$index] !== '') {
+                        return $this->toCamelCase($enumKeys[$index]);
+                    }
+                    if ($index !== false && isset($enumValues[$index])) {
+                        return $this->toCamelCase($enumValues[$index]);
+                    }
+                    $fallback = $enumKeys[0] ?? $enumValues[0] ?? $value;
+                    return $this->toCamelCase((string)$fallback);
+                };
+
+                if ($isArray) {
+                    $values = [];
+                    if (is_string($example) && $example !== '') {
+                        $decoded = json_decode($example, true);
+                        if (is_array($decoded)) {
+                            $values = $decoded;
+                        }
+                    } elseif (is_array($example)) {
+                        $values = $example;
+                    }
+
+                    if (empty($values)) {
+                        $values = [$enumValues[0]];
+                    }
+
+                    $items = array_map(function ($value) use ($enumName, $resolveKey) {
+                        return 'enums.' . \ucfirst($enumName) . '.' . $resolveKey($value);
+                    }, $values);
+
+                    return '[' . implode(', ', $items) . ']';
+                }
+
+                $value = ($example !== null && $example !== '') ? $example : $enumValues[0];
+                return 'enums.' . \ucfirst($enumName) . '.' . $resolveKey($value);
             }),
         ];
     }

@@ -25,6 +25,8 @@ namespace AppwriteTests
             var client = new Client()
                 .AddHeader("Origin", "http://localhost")
                 .SetSelfSigned(true);
+            var sdkHeaders = client.GetHeaders();
+            TestContext.WriteLine($"x-sdk-name: {sdkHeaders["x-sdk-name"]}; x-sdk-platform: {sdkHeaders["x-sdk-platform"]}; x-sdk-language: {sdkHeaders["x-sdk-language"]}; x-sdk-version: {sdkHeaders["x-sdk-version"]}");
 
             var foo = new Foo(client);
             var bar = new Bar(client);
@@ -82,6 +84,16 @@ namespace AppwriteTests
             TestContext.WriteLine(mock.Result);
 
             mock = await general.Enum(MockType.First);
+            TestContext.WriteLine(mock.Result);
+
+            // Request model tests
+            mock = await general.CreatePlayer(new Player("player1", "John Doe", 100));
+            TestContext.WriteLine(mock.Result);
+
+            mock = await general.CreatePlayers(new List<Player> {
+                new Player("player1", "John Doe", 100),
+                new Player("player2", "Jane Doe", 200)
+            });
             TestContext.WriteLine(mock.Result);
 
             try
@@ -151,13 +163,16 @@ namespace AppwriteTests
             TestContext.WriteLine(Query.Select(new List<string> { "name", "age" }));
             TestContext.WriteLine(Query.OrderAsc("title"));
             TestContext.WriteLine(Query.OrderDesc("title"));
+            TestContext.WriteLine(Query.OrderRandom());
             TestContext.WriteLine(Query.CursorAfter("my_movie_id"));
             TestContext.WriteLine(Query.CursorBefore("my_movie_id"));
             TestContext.WriteLine(Query.Limit(50));
             TestContext.WriteLine(Query.Offset(20));
             TestContext.WriteLine(Query.Contains("title", "Spider"));
             TestContext.WriteLine(Query.Contains("labels", "first"));
-            
+            TestContext.WriteLine(Query.ContainsAny("labels", new List<string> { "first", "second" }));
+            TestContext.WriteLine(Query.ContainsAll("labels", new List<string> { "first", "second" }));
+
             // New query methods
             TestContext.WriteLine(Query.NotContains("title", "Spider"));
             TestContext.WriteLine(Query.NotSearch("name", "john"));
@@ -208,6 +223,15 @@ namespace AppwriteTests
                 }
             ));
 
+            // regex, exists, notExists, elemMatch
+            TestContext.WriteLine(Query.Regex("name", "pattern.*"));
+            TestContext.WriteLine(Query.Exists(new List<string> { "attr1", "attr2" }));
+            TestContext.WriteLine(Query.NotExists(new List<string> { "attr1", "attr2" }));
+            TestContext.WriteLine(Query.ElemMatch("friends", new List<string> {
+                Query.Equal("name", "Alice"),
+                Query.GreaterThan("age", 18)
+            }));
+
             // Permission & Roles helper tests
             TestContext.WriteLine(Permission.Read(Role.Any()));
             TestContext.WriteLine(Permission.Write(Role.User(ID.Custom("userid"))));
@@ -223,6 +247,33 @@ namespace AppwriteTests
             // ID helper tests
             TestContext.WriteLine(ID.Unique());
             TestContext.WriteLine(ID.Custom("custom_id"));
+
+            // Operator helper tests
+            TestContext.WriteLine(Operator.Increment(1));
+            TestContext.WriteLine(Operator.Increment(5, 100));
+            TestContext.WriteLine(Operator.Decrement(1));
+            TestContext.WriteLine(Operator.Decrement(3, 0));
+            TestContext.WriteLine(Operator.Multiply(2));
+            TestContext.WriteLine(Operator.Multiply(3, 1000));
+            TestContext.WriteLine(Operator.Divide(2));
+            TestContext.WriteLine(Operator.Divide(4, 1));
+            TestContext.WriteLine(Operator.Modulo(5));
+            TestContext.WriteLine(Operator.Power(2));
+            TestContext.WriteLine(Operator.Power(3, 100));
+            TestContext.WriteLine(Operator.ArrayAppend(new List<object> { "item1", "item2" }));
+            TestContext.WriteLine(Operator.ArrayPrepend(new List<object> { "first", "second" }));
+            TestContext.WriteLine(Operator.ArrayInsert(0, "newItem"));
+            TestContext.WriteLine(Operator.ArrayRemove("oldItem"));
+            TestContext.WriteLine(Operator.ArrayUnique());
+            TestContext.WriteLine(Operator.ArrayIntersect(new List<object> { "a", "b", "c" }));
+            TestContext.WriteLine(Operator.ArrayDiff(new List<object> { "x", "y" }));
+            TestContext.WriteLine(Operator.ArrayFilter(Condition.Equal, "test"));
+            TestContext.WriteLine(Operator.StringConcat("suffix"));
+            TestContext.WriteLine(Operator.StringReplace("old", "new"));
+            TestContext.WriteLine(Operator.Toggle());
+            TestContext.WriteLine(Operator.DateAddDays(7));
+            TestContext.WriteLine(Operator.DateSubDays(3));
+            TestContext.WriteLine(Operator.DateSetNow());
 
             mock = await general.Headers();
             TestContext.WriteLine(mock.Result);

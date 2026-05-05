@@ -16,6 +16,8 @@ void main() async {
   client.setSelfSigned();
 
   print('\nTest Started');
+  final sdkHeaders = client.getHeaders();
+  print("x-sdk-name: ${sdkHeaders['x-sdk-name']}; x-sdk-platform: ${sdkHeaders['x-sdk-platform']}; x-sdk-language: ${sdkHeaders['x-sdk-language']}; x-sdk-version: ${sdkHeaders['x-sdk-version']}");
 
   // Ping pong test
   client.setProject('123456');
@@ -88,6 +90,16 @@ void main() async {
   response = await general.xenum(mockType: MockType.first);
   print(response.result);
 
+  // Request model tests
+  response = await general.createPlayer(player: Player(id: 'player1', name: 'John Doe', score: 100));
+  print(response.result);
+
+  response = await general.createPlayers(players: [
+    Player(id: 'player1', name: 'John Doe', score: 100),
+    Player(id: 'player2', name: 'Jane Doe', score: 200)
+  ]);
+  print(response.result);
+
   try {
     await general.error400();
   } on AppwriteException catch (e) {
@@ -143,13 +155,16 @@ void main() async {
   print(Query.select(["name", "age"]));
   print(Query.orderAsc("title"));
   print(Query.orderDesc("title"));
+  print(Query.orderRandom());
   print(Query.cursorAfter("my_movie_id"));
   print(Query.cursorBefore("my_movie_id"));
   print(Query.limit(50));
   print(Query.offset(20));
   print(Query.contains("title", "Spider"));
   print(Query.contains("labels", "first"));
-  
+  print(Query.containsAny("labels", ["first", "second"]));
+  print(Query.containsAll("labels", ["first", "second"]));
+
   // New query methods
   print(Query.notContains("title", "Spider"));
   print(Query.notSearch("name", "john"));
@@ -196,6 +211,15 @@ void main() async {
     Query.greaterThan("releasedYear", 2015)
   ]));
   
+  // regex, exists, notExists, elemMatch
+  print(Query.regex("name", "pattern.*"));
+  print(Query.exists(["attr1", "attr2"]));
+  print(Query.notExists(["attr1", "attr2"]));
+  print(Query.elemMatch("friends", [
+    Query.equal("name", "Alice"),
+    Query.greaterThan("age", 18)
+  ]));
+  
   // Permission & Role helper tests
   print(Permission.read(Role.any()));
   print(Permission.write(Role.user(ID.custom('userid'))));
@@ -211,6 +235,33 @@ void main() async {
   // ID helper tests
   print(ID.unique());
   print(ID.custom('custom_id'));
+
+  // Operator helper tests
+  print(Operator.increment(1));
+  print(Operator.increment(5, 100));
+  print(Operator.decrement(1));
+  print(Operator.decrement(3, 0));
+  print(Operator.multiply(2));
+  print(Operator.multiply(3, 1000));
+  print(Operator.divide(2));
+  print(Operator.divide(4, 1));
+  print(Operator.modulo(5));
+  print(Operator.power(2));
+  print(Operator.power(3, 100));
+  print(Operator.arrayAppend(["item1", "item2"]));
+  print(Operator.arrayPrepend(["first", "second"]));
+  print(Operator.arrayInsert(0, "newItem"));
+  print(Operator.arrayRemove("oldItem"));
+  print(Operator.arrayUnique());
+  print(Operator.arrayIntersect(["a", "b", "c"]));
+  print(Operator.arrayDiff(["x", "y"]));
+  print(Operator.arrayFilter(Condition.equal, "test"));
+  print(Operator.stringConcat("suffix"));
+  print(Operator.stringReplace("old", "new"));
+  print(Operator.toggle());
+  print(Operator.dateAddDays(7));
+  print(Operator.dateSubDays(3));
+  print(Operator.dateSetNow());
 
   response = await general.headers();
   print(response.result);

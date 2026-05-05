@@ -7,13 +7,18 @@ import io.appwrite.exceptions.AppwriteException
 import io.appwrite.Permission
 import io.appwrite.Role
 import io.appwrite.ID
+import io.appwrite.Channel
 import io.appwrite.Query
+import io.appwrite.Operator
+import io.appwrite.Condition
 import io.appwrite.enums.MockType
 import io.appwrite.extensions.fromJson
 import io.appwrite.extensions.toJson
 import io.appwrite.models.Error
 import io.appwrite.models.InputFile
 import io.appwrite.models.Mock
+import io.appwrite.models.Player
+import io.appwrite.models.RealtimeSubscriptionUpdate
 import io.appwrite.services.Bar
 import io.appwrite.services.Foo
 import io.appwrite.services.General
@@ -64,6 +69,9 @@ class ServiceTest {
             .setProject("123456")
             .addHeader("Origin", "http://localhost")
             .setSelfSigned(true)
+        val sdkHeaders = client.getHeaders()
+
+        writeToFile("x-sdk-name: ${sdkHeaders["x-sdk-name"]}; x-sdk-platform: ${sdkHeaders["x-sdk-platform"]}; x-sdk-language: ${sdkHeaders["x-sdk-language"]}; x-sdk-version: ${sdkHeaders["x-sdk-version"]}")
 
         runBlocking {
             val ping = client.ping()
@@ -80,9 +88,40 @@ class ServiceTest {
         val general = General(client)
         val realtime = Realtime(client)
         var realtimeResponse = "Realtime failed!"
+        var realtimeResponseWithQueries = "Realtime failed!"
+        var realtimeResponseWithQueriesFailure = "Realtime failed!"
 
-        realtime.subscribe("tests", payloadType = TestPayload::class.java) {
+        // Watchdog: flipped to true if the callback fires after unsubscribe, so we can
+        // verify the subscription is *actually* torn down, not just that the call
+        // resolved without throwing.
+        var rtsubFailureUnsubscribed = false
+        var rtsubFailureFiredAfterUnsubscribe = false
+
+        // Subscribe without queries
+        val rtsub = realtime.subscribe("tests", payloadType = TestPayload::class.java) {
             realtimeResponse = it.payload.response
+        }
+
+        // Subscribe with queries to ensure query set support works
+        val rtsubWithQueries = realtime.subscribe(
+            "tests",
+            payloadType = TestPayload::class.java,
+            queries = setOf(
+                Query.equal("response", listOf("WS:/v1/realtime:passed"))
+            )
+        ) {
+            realtimeResponseWithQueries = it.payload.response
+        }
+
+        val rtsubWithQueriesFailure = realtime.subscribe(
+            "tests",
+            payloadType = TestPayload::class.java,
+            queries = setOf(
+                Query.equal("response", listOf("failed"))
+            )
+        ) {
+            if (rtsubFailureUnsubscribed) rtsubFailureFiredAfterUnsubscribe = true
+            realtimeResponseWithQueriesFailure = "WS:/v1/realtime:passed"
         }
 
         runBlocking {
@@ -148,6 +187,16 @@ class ServiceTest {
             mock = general.enum(MockType.FIRST)
             writeToFile(mock.result)
 
+            // Request model tests
+            mock = general.createPlayer(Player(id = "player1", name = "John Doe", score = 100))
+            writeToFile(mock.result)
+
+            mock = general.createPlayers(listOf(
+                Player(id = "player1", name = "John Doe", score = 100),
+                Player(id = "player2", name = "Jane Doe", score = 200)
+            ))
+            writeToFile(mock.result)
+
             try {
                 general.error400()
             } catch (e: AppwriteException) {
@@ -175,8 +224,50 @@ class ServiceTest {
                 writeToFile(e.message)
             }
 
-            delay(5000)
+            delay(30000)
+
             writeToFile(realtimeResponse)
+            writeToFile(realtimeResponseWithQueries)
+            writeToFile(realtimeResponseWithQueriesFailure)
+
+            try {
+                rtsubWithQueriesFailure.unsubscribe()
+                rtsubFailureUnsubscribed = true
+
+                // Idempotence: a second unsubscribe on the same handle must not throw.
+                rtsubWithQueriesFailure.unsubscribe()
+
+                // Give any in-flight frames a chance to be dispatched to the callback.
+                // If we're truly unsubscribed, the watchdog flag stays false.
+                delay(500)
+
+                if (rtsubFailureFiredAfterUnsubscribe) {
+                    throw Exception("callback fired after unsubscribe")
+                }
+
+                writeToFile("Realtime unsubscribe:passed")
+            } catch (e: Exception) {
+                writeToFile("Realtime unsubscribe:failed")
+            }
+
+            try {
+                rtsubWithQueries.update(
+                    RealtimeSubscriptionUpdate(
+                        channels = listOf("tests"),
+                        queries = emptyList()
+                    )
+                )
+                writeToFile("Realtime update:passed")
+            } catch (e: Exception) {
+                writeToFile("Realtime update:failed")
+            }
+
+            try {
+                realtime.disconnect()
+                writeToFile("Realtime disconnect:passed")
+            } catch (e: Exception) {
+                writeToFile("Realtime disconnect:failed")
+            }
 
             // mock = general.setCookie()
             // writeToFile(mock.result)
@@ -203,13 +294,16 @@ class ServiceTest {
             writeToFile(Query.select(listOf("name", "age")))
             writeToFile(Query.orderAsc("title"))
             writeToFile(Query.orderDesc("title"))
+            writeToFile(Query.orderRandom())
             writeToFile(Query.cursorAfter("my_movie_id"))
             writeToFile(Query.cursorBefore("my_movie_id"))
             writeToFile(Query.limit(50))
             writeToFile(Query.offset(20))
             writeToFile(Query.contains("title", listOf("Spider")))
             writeToFile(Query.contains("labels", listOf("first")))
-            
+            writeToFile(Query.containsAny("labels", listOf("first", "second")))
+            writeToFile(Query.containsAll("labels", listOf("first", "second")))
+
             // New query methods
             writeToFile(Query.notContains("title", listOf("Spider")))
             writeToFile(Query.notSearch("name", "john"))
@@ -250,6 +344,15 @@ class ServiceTest {
             writeToFile(Query.or(listOf(Query.equal("released", listOf(true)), Query.lessThan("releasedYear", 1990))))
             writeToFile(Query.and(listOf(Query.equal("released", listOf(false)), Query.greaterThan("releasedYear", 2015))))
 
+            // regex, exists, notExists, elemMatch
+            writeToFile(Query.regex("name", "pattern.*"))
+            writeToFile(Query.exists(listOf("attr1", "attr2")))
+            writeToFile(Query.notExists(listOf("attr1", "attr2")))
+            writeToFile(Query.elemMatch("friends", listOf(
+                Query.equal("name", "Alice"),
+                Query.greaterThan("age", 18)
+            )))
+
             // Permission & Roles helper tests
             writeToFile(Permission.read(Role.any()))
             writeToFile(Permission.write(Role.user(ID.custom("userid"))))
@@ -265,6 +368,62 @@ class ServiceTest {
             // ID helper tests
             writeToFile(ID.unique())
             writeToFile(ID.custom("custom_id"))
+
+            // Channel helper tests
+            writeToFile(Channel.database("db1").collection("col1").document().toString())
+            writeToFile(Channel.database("db1").collection("col1").document("doc1").toString())
+            writeToFile(Channel.database("db1").collection("col1").document("doc1").create().toString())
+            writeToFile(Channel.database("db1").collection("col1").document("doc1").upsert().toString())
+            writeToFile(Channel.tablesdb("db1").table("table1").row().toString())
+            writeToFile(Channel.tablesdb("db1").table("table1").row("row1").toString())
+            writeToFile(Channel.tablesdb("db1").table("table1").row("row1").update().toString())
+            writeToFile(Channel.account())
+            writeToFile(Channel.bucket("bucket1").file().toString())
+            writeToFile(Channel.bucket("bucket1").file("file1").toString())
+            writeToFile(Channel.bucket("bucket1").file("file1").delete().toString())
+            writeToFile(Channel.function("func2").toString())
+            writeToFile(Channel.function("func1").toString())
+            writeToFile(Channel.execution("exec2").toString())
+            writeToFile(Channel.execution("exec1").toString())
+            writeToFile(Channel.documents())
+            writeToFile(Channel.rows())
+            writeToFile(Channel.files())
+            writeToFile(Channel.executions())
+            writeToFile(Channel.teams())
+            writeToFile(Channel.team("team2").toString())
+            writeToFile(Channel.team("team1").toString())
+            writeToFile(Channel.team("team1").create().toString())
+            writeToFile(Channel.memberships())
+            writeToFile(Channel.membership("membership2").toString())
+            writeToFile(Channel.membership("membership1").toString())
+            writeToFile(Channel.membership("membership1").update().toString())
+
+            // Operator helper tests
+            writeToFile(Operator.increment(1))
+            writeToFile(Operator.increment(5, 100))
+            writeToFile(Operator.decrement(1))
+            writeToFile(Operator.decrement(3, 0))
+            writeToFile(Operator.multiply(2))
+            writeToFile(Operator.multiply(3, 1000))
+            writeToFile(Operator.divide(2))
+            writeToFile(Operator.divide(4, 1))
+            writeToFile(Operator.modulo(5))
+            writeToFile(Operator.power(2))
+            writeToFile(Operator.power(3, 100))
+            writeToFile(Operator.arrayAppend(listOf("item1", "item2")))
+            writeToFile(Operator.arrayPrepend(listOf("first", "second")))
+            writeToFile(Operator.arrayInsert(0, "newItem"))
+            writeToFile(Operator.arrayRemove("oldItem"))
+            writeToFile(Operator.arrayUnique())
+            writeToFile(Operator.arrayIntersect(listOf("a", "b", "c")))
+            writeToFile(Operator.arrayDiff(listOf("x", "y")))
+            writeToFile(Operator.arrayFilter(Condition.EQUAL, "test"))
+            writeToFile(Operator.stringConcat("suffix"))
+            writeToFile(Operator.stringReplace("old", "new"))
+            writeToFile(Operator.toggle())
+            writeToFile(Operator.dateAddDays(7))
+            writeToFile(Operator.dateSubDays(3))
+            writeToFile(Operator.dateSetNow())
 
             mock = general.headers()
             writeToFile(mock.result)

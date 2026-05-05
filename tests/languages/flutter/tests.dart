@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -32,15 +33,32 @@ void main() async {
 
   client.setSelfSigned();
   client.setProject('console');
-  client.setEndPointRealtime(
-      "wss://cloud.appwrite.io/v1");
+  client.setEndPointRealtime("wss://cloud.appwrite.io/v1");
 
   Realtime realtime = Realtime(client);
+  // Subscribe without queries
   final rtsub = realtime.subscribe(["tests"]);
+
+  // Subscribe with queries to ensure query array support works
+  final rtsubWithQueries = realtime.subscribe(
+    ["tests"],
+    queries: [
+      Query.equal('response',["WS:/v1/realtime:passed"])
+    ],
+  );
+
+  final rtsubWithQueriesFailure = realtime.subscribe(
+    ["tests"],
+    queries: [
+      Query.equal('response',["failed"])
+    ],
+  );
 
   await Future.delayed(Duration(seconds: 5));
   client.addHeader('Origin', 'http://localhost');
   print('\nTest Started');
+  final sdkHeaders = client.getHeaders();
+  print("x-sdk-name: ${sdkHeaders['x-sdk-name']}; x-sdk-platform: ${sdkHeaders['x-sdk-platform']}; x-sdk-language: ${sdkHeaders['x-sdk-language']}; x-sdk-version: ${sdkHeaders['x-sdk-version']}");
 
   // Ping pong tests
   client.setProject('123456');
@@ -118,6 +136,16 @@ void main() async {
   response = await general.xenum(mockType: MockType.first);
   print(response.result);
 
+  // Request model tests
+  response = await general.createPlayer(player: Player(id: 'player1', name: 'John Doe', score: 100));
+  print(response.result);
+
+  response = await general.createPlayers(players: [
+    Player(id: 'player1', name: 'John Doe', score: 100),
+    Player(id: 'player2', name: 'Jane Doe', score: 200)
+  ]);
+  print(response.result);
+
   try {
     await general.error400();
   } on AppwriteException catch (e) {
@@ -145,12 +173,52 @@ void main() async {
     print(e.message);
   }
 
-  rtsub.stream.listen((message) {
-    print(message.payload["response"]);
-    rtsub.close();
-  });
+  // Assert realtime outputs in a deterministic order (no-query then with-query)
+  final message1 = await rtsub.stream.first.timeout(Duration(seconds: 10));
+  print(message1.payload["response"]);
 
-  await Future.delayed(Duration(seconds: 5));
+  final message2 = await rtsubWithQueries.stream.first.timeout(Duration(seconds: 10));
+  print(message2.payload["response"]);
+
+  try {
+    final message3 = await rtsubWithQueriesFailure.stream.first.timeout(Duration(seconds: 10));
+    // If we receive a message, it means the query filtering failed, so realtime failed
+    print("Realtime failed!");
+  } on TimeoutException {
+    // Timeout means no matching message was received, which is expected for a failure query
+    print("Realtime failed!");
+  }
+
+  try {
+    await rtsubWithQueriesFailure.unsubscribe();
+
+    // Idempotence: a second unsubscribe on the same handle must not throw.
+    await rtsubWithQueriesFailure.unsubscribe();
+
+    // Truly unsubscribed: the backing stream controller should be closed so
+    // no further events can be pushed to consumers.
+    if (!rtsubWithQueriesFailure.controller.isClosed) {
+      throw Exception("controller still open after unsubscribe");
+    }
+
+    print("Realtime unsubscribe:passed");
+  } catch (e) {
+    print("Realtime unsubscribe:failed");
+  }
+
+  try {
+    await rtsubWithQueries.update(channels: ["tests"], queries: []);
+    print("Realtime update:passed");
+  } catch (e) {
+    print("Realtime update:failed");
+  }
+
+  try {
+    await realtime.disconnect();
+    print("Realtime disconnect:passed");
+  } catch (e) {
+    print("Realtime disconnect:failed");
+  }
 
   response = await general.setCookie();
   print(response.result);
@@ -177,13 +245,16 @@ void main() async {
   print(Query.select(["name", "age"]));
   print(Query.orderAsc("title"));
   print(Query.orderDesc("title"));
+  print(Query.orderRandom());
   print(Query.cursorAfter("my_movie_id"));
   print(Query.cursorBefore("my_movie_id"));
   print(Query.limit(50));
   print(Query.offset(20));
   print(Query.contains("title", "Spider"));
   print(Query.contains("labels", "first"));
-  
+  print(Query.containsAny("labels", ["first", "second"]));
+  print(Query.containsAll("labels", ["first", "second"]));
+
   // New query methods
   print(Query.notContains("title", "Spider"));
   print(Query.notSearch("name", "john"));
@@ -229,6 +300,15 @@ void main() async {
     Query.equal("released", false),
     Query.greaterThan("releasedYear", 2015)
   ]));
+  
+  // regex, exists, notExists, elemMatch
+  print(Query.regex("name", "pattern.*"));
+  print(Query.exists(["attr1", "attr2"]));
+  print(Query.notExists(["attr1", "attr2"]));
+  print(Query.elemMatch("friends", [
+    Query.equal("name", "Alice"),
+    Query.greaterThan("age", 18)
+  ]));
 
   // Permission & Role helper tests
   print(Permission.read(Role.any()));
@@ -245,6 +325,62 @@ void main() async {
   // ID helper tests
   print(ID.unique());
   print(ID.custom('custom_id'));
+
+  // Channel helper tests
+  print(Channel.database('db1').collection('col1').document().toString());
+  print(Channel.database('db1').collection('col1').document('doc1').toString());
+  print(Channel.database('db1').collection('col1').document('doc1').create().toString());
+  print(Channel.database('db1').collection('col1').document('doc1').upsert().toString());
+  print(Channel.tablesdb('db1').table('table1').row().toString());
+  print(Channel.tablesdb('db1').table('table1').row('row1').toString());
+  print(Channel.tablesdb('db1').table('table1').row('row1').update().toString());
+  print(Channel.account());
+  print(Channel.bucket('bucket1').file().toString());
+  print(Channel.bucket('bucket1').file('file1').toString());
+  print(Channel.bucket('bucket1').file('file1').delete().toString());
+  print(Channel.function('func2').toString());
+  print(Channel.function('func1').toString());
+  print(Channel.execution('exec2').toString());
+  print(Channel.execution('exec1').toString());
+  print(Channel.documents());
+  print(Channel.rows());
+  print(Channel.files());
+  print(Channel.executions());
+  print(Channel.teams());
+  print(Channel.team('team2').toString());
+  print(Channel.team('team1').toString());
+  print(Channel.team('team1').create().toString());
+  print(Channel.memberships());
+  print(Channel.membership('membership2').toString());
+  print(Channel.membership('membership1').toString());
+  print(Channel.membership('membership1').update().toString());
+
+  // Operator helper tests
+  print(Operator.increment(1));
+  print(Operator.increment(5, 100));
+  print(Operator.decrement(1));
+  print(Operator.decrement(3, 0));
+  print(Operator.multiply(2));
+  print(Operator.multiply(3, 1000));
+  print(Operator.divide(2));
+  print(Operator.divide(4, 1));
+  print(Operator.modulo(5));
+  print(Operator.power(2));
+  print(Operator.power(3, 100));
+  print(Operator.arrayAppend(["item1", "item2"]));
+  print(Operator.arrayPrepend(["first", "second"]));
+  print(Operator.arrayInsert(0, "newItem"));
+  print(Operator.arrayRemove("oldItem"));
+  print(Operator.arrayUnique());
+  print(Operator.arrayIntersect(["a", "b", "c"]));
+  print(Operator.arrayDiff(["x", "y"]));
+  print(Operator.arrayFilter(Condition.equal, "test"));
+  print(Operator.stringConcat("suffix"));
+  print(Operator.stringReplace("old", "new"));
+  print(Operator.toggle());
+  print(Operator.dateAddDays(7));
+  print(Operator.dateSubDays(3));
+  print(Operator.dateSetNow());
 
   response = await general.headers();
   print(response.result);

@@ -1,0 +1,341 @@
+name: Appwrite SDK Build Validation
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on: [pull_request]
+
+jobs:
+  generate-and-build:
+    name: ${{ matrix.sdk }} (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    env:
+      # Bun 1.3.12 has a sig_size calculation bug in macho.zig that truncates the
+      # LC_CODE_SIGNATURE blob on cross-compiled Darwin binaries (oven-sh/bun#29120).
+      # Unpin once a Bun release includes the upstream fix (oven-sh/bun#29122).
+      CLI_BUN_VERSION: '1.3.11'
+      OSV_SCANNER_VERSION: 'v2.3.1'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Client SDKs
+          - sdk: web
+            platform: client
+
+          - sdk: flutter
+            platform: client
+
+          - sdk: apple
+            platform: client
+
+          - sdk: android
+            platform: client
+
+          - sdk: react-native
+            platform: client
+
+          # Server SDKs
+          - sdk: node
+            platform: server
+
+          - sdk: php
+            platform: server
+
+          - sdk: python
+            platform: server
+
+          - sdk: ruby
+            platform: server
+
+          - sdk: dart
+            platform: server
+
+          - sdk: go
+            platform: server
+
+          - sdk: swift
+            platform: server
+
+          - sdk: dotnet
+            platform: server
+
+          - sdk: kotlin
+            platform: server
+
+          - sdk: rust
+            platform: server
+
+          # Console SDKs
+          - sdk: cli
+            platform: console
+          
+          - sdk: web
+            platform: console
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl
+
+      - name: Install Composer Dependencies
+        run: composer install
+
+      - name: Generate SDK for ${{ matrix.sdk }}
+        run: php example.php ${{ matrix.sdk }} ${{ matrix.platform }}
+
+      # Language-specific setup
+      - name: Setup Node.js
+        if: matrix.sdk == 'web' || matrix.sdk == 'node' || matrix.sdk == 'react-native' || matrix.sdk == 'cli'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Setup Bun
+        if: matrix.sdk == 'cli'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.CLI_BUN_VERSION }}
+
+      - name: Setup Flutter
+        if: matrix.sdk == 'flutter'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Setup Swift
+        if: matrix.sdk == 'apple' || matrix.sdk == 'swift'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget https://download.swift.org/swift-5.9.2-release/ubuntu2204/swift-5.9.2-RELEASE/swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
+          tar xzf swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
+          sudo mv swift-5.9.2-RELEASE-ubuntu22.04 /usr/share/swift
+          echo "/usr/share/swift/usr/bin" >> $GITHUB_PATH
+
+      - name: Setup Java
+        if: matrix.sdk == 'android' || matrix.sdk == 'kotlin'
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Python
+        if: matrix.sdk == 'python'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Setup Ruby
+        if: matrix.sdk == 'ruby'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+
+      - name: Setup Dart
+        if: matrix.sdk == 'dart'
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 'stable'
+
+      - name: Setup Go
+        if: matrix.sdk == 'go' || matrix.sdk == 'dart' || matrix.sdk == 'flutter'
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.x'
+
+      - name: Install OSV Scanner
+        if: matrix.sdk == 'dart' || matrix.sdk == 'flutter'
+        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@${{ env.OSV_SCANNER_VERSION }}
+
+      - name: Setup .NET
+        if: matrix.sdk == 'dotnet'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Rust
+        if: matrix.sdk == 'rust'
+        uses: dtolnay/rust-toolchain@1.83.0
+
+      - name: Setup Rust for cargo-audit
+        if: matrix.sdk == 'rust'
+        run: rustup toolchain install 1.85.0 --profile minimal --no-self-update
+
+      - name: Cache cargo-audit
+        if: matrix.sdk == 'rust'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-audit
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-audit-0.22.1
+
+      - name: Build SDK
+        working-directory: examples/${{ matrix.sdk }}
+        run: |
+          case "${{ matrix.sdk }}" in
+            web)
+              npm ci
+              npm audit
+              npm run build
+              ;;
+            cli)
+              bun install
+              bun run linux-x64
+              bun run linux-arm64
+              bun run mac-x64
+              bun run mac-arm64
+              bun run windows-x64
+              bun run windows-arm64
+
+              npm ci
+              npm audit
+              npm run build
+              node dist/cli.cjs --help
+              ;;
+            react-native)
+              npm ci
+              npm audit
+              npm run build
+              ;;
+            flutter)
+              flutter pub get
+              osv-scanner scan source --lockfile=pubspec.lock
+              dart analyze --no-fatal-warnings
+              ;;
+            apple|swift)
+              swift build
+              ;;
+            android)
+              chmod +x ./gradlew || true
+              ./gradlew build -x lint
+              ;;
+            kotlin)
+              chmod +x ./gradlew || true
+              ./gradlew build
+              ;;
+            php)
+              composer install
+              composer audit
+              composer test
+              ;;
+            python)
+              python -m pip install pip-audit
+              pip install -e .[test]
+              pip-audit --strict .
+              python -m compileall appwrite/
+              python -m unittest
+              ;;
+            ruby)
+              bundle install
+              gem install bundler-audit
+              bundle-audit update
+              bundle-audit check --no-update
+              ;;
+            node)
+              npm ci
+              npm audit
+              npm run build
+              npm run test
+              ;;
+            dart)
+              dart pub get
+              osv-scanner scan source --lockfile=pubspec.lock
+              dart analyze --no-fatal-warnings
+              dart test
+              ;;
+            go)
+              go mod tidy || true
+              go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+              govulncheck ./...
+              go build ./...
+              go test ./...
+              ;;
+            dotnet)
+              dotnet restore
+              dotnet build --no-restore
+              dotnet test --no-build
+              ;;
+            rust)
+              cargo generate-lockfile
+              if ! command -v cargo-audit >/dev/null; then
+                cargo +1.85.0 install cargo-audit --version 0.22.1 --locked
+              fi
+              cargo audit
+              cargo +1.83.0 build --release
+              cargo +1.83.0 test --lib
+              ;;
+            *)
+              echo "Unknown SDK: ${{ matrix.sdk }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Verify CLI Darwin binaries include valid embedded code signatures
+        if: matrix.sdk == 'cli'
+        working-directory: examples/cli
+        run: python3 ../../scripts/verify-darwin-signatures.py
+
+      - name: Verify npm package entry points
+        if: matrix.sdk == 'web' || matrix.sdk == 'node' || matrix.sdk == 'react-native' || matrix.sdk == 'cli'
+        working-directory: examples/${{ matrix.sdk }}
+        run: |
+          echo "::group::Checking package.json has files field"
+          if ! node -e "const pkg = require('./package.json'); if (!pkg.files) { console.error('ERROR: package.json is missing \"files\" field — dist/ will be excluded from npm publish'); process.exit(1); }"; then
+            exit 1
+          fi
+          echo "files field present"
+          echo "::endgroup::"
+
+          echo "::group::Running npm pack --dry-run"
+          PACK_OUTPUT=$(npm pack --dry-run 2>&1)
+          echo "$PACK_OUTPUT"
+          echo "::endgroup::"
+
+          echo "::group::Verifying declared entry points are in the tarball"
+          # Collect all entry point paths from package.json exports, main, and module
+          ENTRY_POINTS=$(node -e "
+            const pkg = require('./package.json');
+            const paths = new Set();
+            if (pkg.main) paths.add(pkg.main);
+            if (pkg.module) paths.add(pkg.module);
+            function walk(obj) {
+              if (typeof obj === 'string') {
+                if (obj.endsWith('.js') || obj.endsWith('.cjs') || obj.endsWith('.mjs')) {
+                  paths.add(obj.replace(/^\.\//, ''));
+                }
+              } else if (obj && typeof obj === 'object') {
+                Object.values(obj).forEach(walk);
+              }
+            }
+            if (pkg.exports) walk(pkg.exports);
+            if (pkg.bin) walk(pkg.bin);
+            paths.forEach(p => console.log(p));
+          ")
+
+          MISSING=0
+          for entry in $ENTRY_POINTS; do
+            if echo "$PACK_OUTPUT" | grep -qF "$entry"; then
+              echo "✓ $entry is included"
+            else
+              echo "✗ $entry is MISSING from package — will break consumers"
+              MISSING=1
+            fi
+          done
+
+          if [ "$MISSING" -eq 1 ]; then
+            echo "::error::One or more entry points declared in package.json are not included in the npm package. Check the \"files\" field."
+            exit 1
+          fi
+          echo "All entry points verified."
+          echo "::endgroup::"

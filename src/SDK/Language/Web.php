@@ -14,6 +14,21 @@ class Web extends JS
         return 'Web';
     }
 
+    public function getStaticAccessOperator(): string
+    {
+        return '.';
+    }
+
+    public function getStringQuote(): string
+    {
+        return "'";
+    }
+
+    public function getArrayOf(string $elements): string
+    {
+        return '[' . $elements . ']';
+    }
+
     /**
      * @return array
      */
@@ -42,6 +57,11 @@ class Web extends JS
             ],
             [
                 'scope'         => 'default',
+                'destination'   => 'src/services/realtime.ts',
+                'template'      => 'web/src/services/realtime.ts.twig',
+            ],
+            [
+                'scope'         => 'default',
                 'destination'   => 'src/models.ts',
                 'template'      => 'web/src/models.ts.twig',
             ],
@@ -62,8 +82,18 @@ class Web extends JS
             ],
             [
                 'scope'         => 'default',
+                'destination'   => 'src/channel.ts',
+                'template'      => 'web/src/channel.ts.twig',
+            ],
+            [
+                'scope'         => 'default',
                 'destination'   => 'src/query.ts',
                 'template'      => 'web/src/query.ts.twig',
+            ],
+            [
+                'scope'         => 'default',
+                'destination'   => 'src/operator.ts',
+                'template'      => 'web/src/operator.ts.twig',
             ],
             [
                 'scope'         => 'default',
@@ -81,9 +111,9 @@ class Web extends JS
                 'template'      => 'web/LICENSE.twig',
             ],
             [
-                'scope'         => 'default',
-                'destination'   => 'package.json',
-                'template'      => 'web/package.json.twig',
+            'scope'         => 'default',
+            'destination'   => 'package.json',
+            'template'      => 'web/package.json.twig',
             ],
             [
                 'scope'         => 'method',
@@ -97,8 +127,8 @@ class Web extends JS
             ],
             [
                 'scope'         => 'default',
-                'destination'   => 'rollup.config.js',
-                'template'      => '/web/rollup.config.js.twig',
+                'destination'   => 'rollup.config.mjs',
+                'template'      => '/web/rollup.config.mjs.twig',
             ],
             [
                 'scope'         => 'default',
@@ -120,14 +150,25 @@ class Web extends JS
                 'destination'   => 'src/enums/{{ enum.name | caseKebab }}.ts',
                 'template'      => 'web/src/enums/enum.ts.twig',
             ],
+            [
+                'scope'         => 'copy',
+                'destination'   => '.gitignore',
+                'template'      => 'web/.gitignore',
+            ],
+            [
+                'scope'         => 'default',
+                'destination'   => 'package-lock.json',
+                'template'      => 'web/package-lock.json.twig',
+            ],
         ];
     }
 
     /**
      * @param array $param
+     * @param string $lang
      * @return string
      */
-    public function getParamExample(array $param): string
+    public function getParamExample(array $param, string $lang = ''): string
     {
         $type       = $param['type'] ?? '';
         $example    = $param['example'] ?? '';
@@ -145,7 +186,8 @@ class Web extends JS
         }
 
         return match ($type) {
-            self::TYPE_ARRAY, self::TYPE_INTEGER, self::TYPE_NUMBER => $example,
+            self::TYPE_ARRAY => $this->isPermissionString($example) ? $this->getPermissionExample($example) : $example,
+            self::TYPE_INTEGER, self::TYPE_NUMBER => $example,
             self::TYPE_FILE => 'document.getElementById(\'uploader\').files[0]',
             self::TYPE_BOOLEAN => ($example) ? 'true' : 'false',
             self::TYPE_OBJECT => ($example === '{}')
@@ -179,11 +221,32 @@ class Web extends JS
 
     public function getTypeName(array $parameter, array $method = []): string
     {
+        if (
+            ($parameter['type'] ?? null) === self::TYPE_ARRAY
+            && (isset($parameter['enumName']) || !empty($parameter['enumValues']))
+        ) {
+            $enumType = isset($parameter['enumName'])
+                ? \ucfirst($parameter['enumName'])
+                : \ucfirst($parameter['name']);
+
+            return $enumType . '[]';
+        }
+
         if (isset($parameter['enumName'])) {
             return \ucfirst($parameter['enumName']);
         }
         if (!empty($parameter['enumValues'])) {
             return \ucfirst($parameter['name']);
+        }
+        if (!empty($parameter['array']['model'])) {
+            return 'Models.' . $this->toPascalCase($parameter['array']['model']) . '[]';
+        }
+        if (!empty($parameter['model'])) {
+            if ($parameter['model'] === 'any') {
+                return $parameter['type'] === self::TYPE_ARRAY ? 'Record<string, any>[]' : 'Record<string, any>';
+            }
+            $modelType = 'Models.' . $this->toPascalCase($parameter['model']);
+            return $parameter['type'] === self::TYPE_ARRAY ? $modelType . '[]' : $modelType;
         }
         if (isset($parameter['items'])) {
             // Map definition nested type to parameter nested type
@@ -192,6 +255,9 @@ class Web extends JS
         switch ($parameter['type']) {
             case self::TYPE_INTEGER:
             case self::TYPE_NUMBER:
+                if (isset($parameter['format']) && $parameter['format'] === 'int64') {
+                    return 'number | bigint';
+                }
                 return 'number';
             case self::TYPE_ARRAY:
                 if (!empty($parameter['array']['x-anyOf'] ?? [])) {
@@ -244,6 +310,10 @@ class Web extends JS
 
     protected function populateGenerics(string $model, array $spec, array &$generics, bool $skipFirst = false)
     {
+        if (!array_key_exists($model, $spec['definitions'])) {
+            return;
+        }
+
         if (!$skipFirst && $spec['definitions'][$model]['additionalProperties']) {
             $generics[] = $this->toPascalCase($model);
         }
@@ -275,6 +345,54 @@ class Web extends JS
         return '<' . implode(', ', $generics) . '>';
     }
 
+    /**
+     * Generate union return type for methods with multiple response models.
+     */
+    protected function getUnionReturnType(array $method, array $spec): ?string
+    {
+        // check for union types i.e. multiple response models
+        if (!array_key_exists('responseModels', $method) || empty($method['responseModels']) || count($method['responseModels']) <= 1) {
+            return null;
+        }
+
+        $unionTypes = [];
+
+        foreach ($method['responseModels'] as $model) {
+            if ($model === 'any') {
+                continue;
+            }
+
+            $modelType = '';
+
+            if (
+                array_key_exists($model, $spec['definitions']) &&
+                array_key_exists('additionalProperties', $spec['definitions'][$model]) &&
+                !$spec['definitions'][$model]['additionalProperties']
+            ) {
+                $modelType .= 'Models.';
+            }
+
+            $modelType .= $this->toPascalCase($model);
+
+            $models = [];
+            $this->populateGenerics($model, $spec, $models);
+            $models = array_unique($models);
+            $models = array_filter($models, fn ($m) => $m != $this->toPascalCase($model));
+
+            if (!empty($models)) {
+                $modelType .= '<' . implode(', ', $models) . '>';
+            }
+
+            $unionTypes[] = $modelType;
+        }
+
+        if (empty($unionTypes)) {
+            return null;
+        }
+
+        return 'Promise<' . implode(' | ', $unionTypes) . '>';
+    }
+
     public function getReturn(array $method, array $spec): string
     {
         if ($method['type'] === 'webAuth') {
@@ -283,6 +401,12 @@ class Web extends JS
 
         if ($method['type'] === 'location') {
             return 'string';
+        }
+
+        // check for union types i.e. multiple response models
+        $unionType = $this->getUnionReturnType($method, $spec);
+        if ($unionType !== null) {
+            return $unionType;
         }
 
         if (array_key_exists('responseModel', $method) && !empty($method['responseModel']) && $method['responseModel'] !== 'any') {
@@ -313,12 +437,17 @@ class Web extends JS
 
             return $ret;
         }
+
         return 'Promise<{}>';
     }
 
-    public function getSubSchema(array $property, array $spec): string
+    public function getSubSchema(array $property, array $spec, string $methodName = ''): string
     {
         if (array_key_exists('sub_schema', $property)) {
+            if ($property['sub_schema'] === 'any') {
+                return $property['type'] === 'array' ? 'Record<string, any>[]' : 'Record<string, any>';
+            }
+
             $ret = '';
             $generics = [];
             $this->populateGenerics($property['sub_schema'], $spec, $generics);
@@ -336,6 +465,14 @@ class Web extends JS
             return $ret;
         }
 
+        if (array_key_exists('enum', $property) && !empty($methodName)) {
+            if (isset($property['enumName'])) {
+                return $this->toPascalCase($property['enumName']);
+            }
+
+            return $this->toPascalCase($methodName) . $this->toPascalCase($property['name']);
+        }
+
         return $this->getTypeName($property);
     }
 
@@ -348,8 +485,8 @@ class Web extends JS
             new TwigFilter('getReadOnlyProperties', function ($value, $responseModel, $spec = []) {
                 return $this->getReadOnlyProperties($value, $responseModel, $spec);
             }),
-            new TwigFilter('getSubSchema', function (array $property, array $spec) {
-                return $this->getSubSchema($property, $spec);
+            new TwigFilter('getSubSchema', function (array $property, array $spec, string $methodName = '') {
+                return $this->getSubSchema($property, $spec, $methodName);
             }),
             new TwigFilter('getGenerics', function (string $model, array $spec, bool $skipAdditional = false) {
                 return $this->getGenerics($model, $spec, $skipAdditional);
@@ -357,6 +494,48 @@ class Web extends JS
             new TwigFilter('getReturn', function (array $method, array $spec) {
                 return $this->getReturn($method, $spec);
             }),
+            new TwigFilter('getOverloadCondition', function (array $method) {
+                $params = $method['parameters']['all'] ?? [];
+
+                $hasRequired = false;
+                foreach ($params as $param) {
+                    if ($param['required'] ?? false) {
+                        $hasRequired = true;
+                        break;
+                    }
+                }
+
+                $condition = '';
+                if (!$hasRequired) {
+                    $condition .= '!paramsOrFirst || ';
+                }
+
+                $condition .= "(paramsOrFirst && typeof paramsOrFirst === 'object' && !Array.isArray(paramsOrFirst)";
+
+                $firstParamType = $this->getTypeName($params[0], $method);
+                $isPrimitive = str_starts_with($firstParamType, 'string')
+                    || str_starts_with($firstParamType, 'number')
+                    || str_starts_with($firstParamType, 'boolean');
+
+                if (!$isPrimitive) {
+                    $keys = [];
+                    foreach ($params as $param) {
+                        $name = $this->toCamelCase($param['name']);
+                        $name = $this->escapeKeyword($name);
+                        $keys[] = "'" . $name . "' in paramsOrFirst";
+                    }
+
+                    if (in_array('multipart/form-data', $method['consumes'] ?? [])) {
+                        $keys[] = "'onProgress' in paramsOrFirst";
+                    }
+
+                    $condition .= ' && (' . implode(' || ', $keys) . ')';
+                }
+
+                $condition .= ')';
+
+                return $condition;
+            }, ['is_safe' => ['html']]),
             new TwigFilter('comment2', function ($value) {
                 $value = explode("\n", $value);
                 foreach ($value as $key => $line) {

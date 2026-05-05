@@ -1,4 +1,47 @@
 import { Models } from './models';
+import { Channel, ActionableChannel, ResolvedChannel } from './channel';
+import { Query } from './query';
+import { ID } from './id';
+import JSONbigModule from 'json-bigint';
+const JSONbigParser = JSONbigModule({ storeAsString: false });
+const JSONbigSerializer = JSONbigModule({ useNativeBigInt: true });
+
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
+const MAX_INT64 = BigInt('9223372036854775807');
+const MIN_INT64 = BigInt('-9223372036854775808');
+
+function isBigNumber(value: any): boolean {
+    return value !== null
+        && typeof value === 'object'
+        && value._isBigNumber === true
+        && typeof value.isInteger === 'function'
+        && typeof value.toFixed === 'function'
+        && typeof value.toNumber === 'function';
+}
+
+function reviver(_key: string, value: any): any {
+    if (isBigNumber(value)) {
+        if (value.isInteger()) {
+            const str = value.toFixed();
+            const bi = BigInt(str);
+            if (bi >= MIN_SAFE && bi <= MAX_SAFE) {
+                return Number(str);
+            }
+            if (bi >= MIN_INT64 && bi <= MAX_INT64) {
+                return bi;
+            }
+            return value.toNumber();
+        }
+        return value.toNumber();
+    }
+    return value;
+}
+
+export const JSONbig = {
+    parse: (text: string) => JSONbigParser.parse(text, reviver),
+    stringify: JSONbigSerializer.stringify
+};
 
 /**
  * Payload type representing a key-value pair with string keys and any values.
@@ -34,14 +77,20 @@ type RealtimeResponse = {
  */
 type RealtimeRequest = {
     /**
-     * Type of the request: 'authentication'.
+     * Type of the request: 'authentication' or 'subscribe'.
      */
-    type: 'authentication';
+    type: 'authentication' | 'subscribe';
 
     /**
      * Data required for authentication.
      */
-    data: RealtimeRequestAuthenticate;
+    data: RealtimeRequestAuthenticate | RealtimeRequestSubscribe[];
+}
+
+type RealtimeRequestSubscribe = {
+    subscriptionId: string;
+    channels: string[];
+    queries: string[];
 }
 
 /**
@@ -61,12 +110,17 @@ type RealtimeResponseEvent<T extends unknown> = {
     /**
      * Timestamp indicating the time of the event.
      */
-    timestamp: number;
+    timestamp: string;
 
     /**
      * Payload containing event-specific data.
      */
     payload: T;
+
+    /**
+     * Subscription IDs this event matches (from backend, optional).
+     */
+    subscriptions?: string[];
 }
 
 /**
@@ -166,17 +220,18 @@ type Realtime = {
     channels: Set<string>;
 
     /**
-     * Map of subscriptions containing channel names and corresponding callback functions.
+     * Map of subscriptions keyed by client-generated subscriptionId.
      */
-    subscriptions: Map<number, {
+    subscriptions: Map<string, {
         channels: string[];
+        queries: string[];
         callback: (payload: RealtimeResponseEvent<any>) => void
     }>;
 
     /**
-     * Counter for managing subscriptions.
+     * Pending subscribe rows keyed by subscriptionId. Flushed and cleared on each send.
      */
-    subscriptionsCounter: number;
+    pendingSubscribes: Map<string, RealtimeRequestSubscribe>;
 
     /**
      * Boolean indicating whether automatic reconnection is enabled.
@@ -208,12 +263,7 @@ type Realtime = {
      */
     createHeartbeat: () => void;
 
-    /**
-     * Function to clean up resources associated with specified channels.
-     *
-     * @param {string[]} channels - List of channel names to clean up.
-     */
-    cleanUp: (channels: string[]) => void;
+    sendPendingSubscribes: () => void;
 
     /**
      * Function to handle incoming messages from the WebSocket connection.
@@ -300,12 +350,26 @@ class Client {
     /**
      * Holds configuration such as project.
      */
-    config = {
+    config: {
+        endpoint: string;
+        endpointRealtime: string;
+{%~ for header in spec.global.headers %}
+        {{ header.key | caseLower }}: string;
+{%~ endfor %}
+{%~ if sdk.platform == 'console' %}
+        selfSigned: boolean;
+        session?: string;
+{%~ endif %}
+    } = {
         endpoint: '{{ spec.endpoint }}',
         endpointRealtime: '',
-        {%~ for header in spec.global.headers %}
+{%~ for header in spec.global.headers %}
         {{ header.key | caseLower }}: '',
-        {%~ endfor %}
+{%~ endfor %}
+{%~ if sdk.platform == 'console' %}
+        selfSigned: false,
+        session: undefined,
+{%~ endif %}
     };
     /**
      * Custom headers for API requests.
@@ -321,6 +385,18 @@ class Client {
     };
 
     /**
+     * Get Headers
+     *
+     * Returns a copy of the current request headers, including any
+     * authentication headers. Handle with care.
+     *
+     * @returns {Headers}
+     */
+    getHeaders(): Headers {
+        return { ...this.headers };
+    }
+
+    /**
      * Set Endpoint
      *
      * Your project endpoint
@@ -330,6 +406,10 @@ class Client {
      * @returns {this}
      */
     setEndpoint(endpoint: string): this {
+        if (!endpoint || typeof endpoint !== 'string') {
+            throw new {{spec.title | caseUcfirst}}Exception('Endpoint must be a valid string');
+        }
+
         if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
             throw new {{spec.title | caseUcfirst}}Exception('Invalid endpoint URL: ' + endpoint);
         }
@@ -348,6 +428,10 @@ class Client {
      * @returns {this}
      */
     setEndpointRealtime(endpointRealtime: string): this {
+        if (!endpointRealtime || typeof endpointRealtime !== 'string') {
+            throw new {{spec.title | caseUcfirst}}Exception('Endpoint must be a valid string');
+        }
+
         if (!endpointRealtime.startsWith('ws://') && !endpointRealtime.startsWith('wss://')) {
             throw new {{spec.title | caseUcfirst}}Exception('Invalid realtime endpoint URL: ' + endpointRealtime);
         }
@@ -356,6 +440,20 @@ class Client {
         return this;
     }
 
+{%~ if sdk.platform == 'console' %}
+    /**
+     * Set self-signed
+     *
+     * @param {boolean} selfSigned
+     *
+     * @returns {this}
+     */
+    setSelfSigned(selfSigned: boolean): this {
+        this.config.selfSigned = selfSigned;
+        return this;
+    }
+
+{%~ endif %}
     {%~ for header in spec.global.headers %}
     /**
      * Set {{header.key | caseUcfirst}}
@@ -382,7 +480,7 @@ class Client {
         url: '',
         channels: new Set(),
         subscriptions: new Map(),
-        subscriptionsCounter: 0,
+        pendingSubscribes: new Map(),
         reconnect: true,
         reconnectAttempts: 0,
         lastMessage: undefined,
@@ -410,25 +508,23 @@ class Client {
             }
 
             this.realtime.heartbeat = window?.setInterval(() => {
-                this.realtime.socket?.send(JSON.stringify({
+                this.realtime.socket?.send(JSONbig.stringify({
                     type: 'ping'
                 }));
             }, 20_000);
         },
         createSocket: () => {
-            if (this.realtime.channels.size < 1) {
+            if (this.realtime.subscriptions.size < 1) {
                 this.realtime.reconnect = false;
                 this.realtime.socket?.close();
                 return;
             }
 
-            const channels = new URLSearchParams();
-            channels.set('project', this.config.project);
-            this.realtime.channels.forEach(channel => {
-                channels.append('channels[]', channel);
-            });
+            const encodedProject = encodeURIComponent((this.config.project as string) ?? '');
+            // URL carries only the project; channels/queries are sent via subscribe message.
+            const queryParams = 'project=' + encodedProject;
 
-            const url = this.config.endpointRealtime + '/realtime?' + channels.toString();
+            const url = this.config.endpointRealtime + '/realtime?' + queryParams;
 
             if (
                 url !== this.realtime.url || // Check if URL is present
@@ -470,39 +566,87 @@ class Client {
                         this.realtime.createSocket();
                     }, timeout);
                 })
+            } else if (this.realtime.socket?.readyState === WebSocket.OPEN) {
+                this.realtime.sendPendingSubscribes();
             }
+        },
+        sendPendingSubscribes: () => {
+            if (!this.realtime.socket || this.realtime.socket.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            if (this.realtime.pendingSubscribes.size < 1) {
+                return;
+            }
+
+            const rows = Array.from(this.realtime.pendingSubscribes.values());
+            this.realtime.pendingSubscribes.clear();
+
+            this.realtime.socket.send(JSONbig.stringify(<RealtimeRequest>{
+                type: 'subscribe',
+                data: rows
+            }));
         },
         onMessage: (event) => {
             try {
-                const message: RealtimeResponse = JSON.parse(event.data);
+                const message: RealtimeResponse = JSONbig.parse(event.data);
                 this.realtime.lastMessage = message;
                 switch (message.type) {
-                    case 'connected':
-                        const cookie = JSON.parse(window.localStorage.getItem('cookieFallback') ?? '{}');
-                        const session = cookie?.[`a_session_${this.config.project}`];
+                    case 'connected': {
                         const messageData = <RealtimeResponseConnected>message.data;
 
-                        if (session && !messageData.user) {
-                            this.realtime.socket?.send(JSON.stringify(<RealtimeRequest>{
+                        let session = this.config.session;
+                        if (!session) {
+                            const cookie = JSONbig.parse(window.localStorage.getItem('cookieFallback') ?? '{}');
+                            session = cookie?.[`a_session_${this.config.project}`];
+                        }
+                        if (session && !messageData?.user) {
+                            this.realtime.socket?.send(JSONbig.stringify(<RealtimeRequest>{
                                 type: 'authentication',
                                 data: {
                                     session
                                 }
                             }));
                         }
+
+                        this.realtime.subscriptions.forEach((sub, subscriptionId) => {
+                            this.realtime.pendingSubscribes.set(subscriptionId, {
+                                subscriptionId,
+                                channels: sub.channels,
+                                queries: sub.queries ?? []
+                            });
+                        });
+                        this.realtime.sendPendingSubscribes();
                         break;
-                    case 'event':
-                        let data = <RealtimeResponseEvent<unknown>>message.data;
-                        if (data?.channels) {
+                    }
+                    case 'response':
+                        // The SDK generates subscriptionIds client-side and sends them on every
+                        // subscribe/unsubscribe, so subscribe/unsubscribe acks carry no state
+                        // the SDK needs to reconcile.
+                        break;
+                    case 'event': {
+                        const data = <RealtimeResponseEvent<unknown>>message.data;
+                        if (!data?.channels) break;
+
+                        const eventSubIds = data.subscriptions;
+                        if (eventSubIds && eventSubIds.length > 0) {
+                            for (const subscriptionId of eventSubIds) {
+                                const subscription = this.realtime.subscriptions.get(subscriptionId);
+                                if (subscription) {
+                                    setTimeout(() => subscription.callback(data));
+                                }
+                            }
+                        } else {
                             const isSubscribed = data.channels.some(channel => this.realtime.channels.has(channel));
-                            if (!isSubscribed) return;
+                            if (!isSubscribed) break;
                             this.realtime.subscriptions.forEach(subscription => {
                                 if (data.channels.some(channel => subscription.channels.includes(channel))) {
                                     setTimeout(() => subscription.callback(data));
                                 }
-                            })
+                            });
                         }
                         break;
+                    }
                     case 'pong':
                         break; // Handle pong response if needed
                     case 'error':
@@ -513,27 +657,17 @@ class Client {
             } catch (e) {
                 console.error(e);
             }
-        },
-        cleanUp: channels => {
-            this.realtime.channels.forEach(channel => {
-                if (channels.includes(channel)) {
-                    let found = Array.from(this.realtime.subscriptions).some(([_key, subscription] )=> {
-                        return subscription.channels.includes(channel);
-                    })
-
-                    if (!found) {
-                        this.realtime.channels.delete(channel);
-                    }
-                }
-            })
         }
     }
 
     /**
      * Subscribes to {{spec.title | caseUcfirst}} events and passes you the payload in realtime.
      *
-     * @param {string|string[]} channels
-     * Channel to subscribe - pass a single channel as a string or multiple with an array of strings.
+     * @deprecated Use the Realtime service instead.
+     * @see Realtime
+     *
+     * @param {string|string[]|Channel<any>|ActionableChannel|ResolvedChannel|(Channel<any>|ActionableChannel|ResolvedChannel)[]} channels
+     * Channel to subscribe - pass a single channel as a string or Channel builder instance, or multiple with an array.
      *
      * Possible channels are:
      * - account
@@ -551,24 +685,75 @@ class Client {
      * - teams.[ID]
      * - memberships
      * - memberships.[ID]
+     * 
+     * You can also use Channel builders:
+     * - Channel.database('db').collection('col').document('doc').create()
+     * - Channel.bucket('bucket').file('file').update()
+     * - Channel.function('func').execution('exec').delete()
+     * - Channel.team('team').create()
+     * - Channel.membership('membership').update()
      * @param {(payload: RealtimeMessage) => void} callback Is called on every realtime update.
      * @returns {() => void} Unsubscribes from events.
      */
-    subscribe<T extends unknown>(channels: string | string[], callback: (payload: RealtimeResponseEvent<T>) => void): () => void {
-        let channelArray = typeof channels === 'string' ? [channels] : channels;
-        channelArray.forEach(channel => this.realtime.channels.add(channel));
+    subscribe<T extends unknown>(
+        channels: string | string[] | Channel<any> | ActionableChannel | ResolvedChannel | (Channel<any> | ActionableChannel | ResolvedChannel)[],
+        callback: (payload: RealtimeResponseEvent<T>) => void,
+        queries: (string | Query)[] = []
+    ): () => void {
+        const channelArray = Array.isArray(channels) ? channels : [channels];
+        // Convert Channel instances to strings
+        const channelStrings = channelArray.map(ch => {
+            if (typeof ch === 'string') {
+                return ch;
+            }
+            // All Channel instances have toString() method
+            if (ch && typeof (ch as Channel<any>).toString === 'function') {
+                return (ch as Channel<any>).toString();
+            }
+            // Fallback to generic string conversion
+            return String(ch);
+        });
+        channelStrings.forEach(channel => this.realtime.channels.add(channel));
 
-        const counter = this.realtime.subscriptionsCounter++;
-        this.realtime.subscriptions.set(counter, {
-            channels: channelArray,
+        const queryStrings = (queries ?? []).map(q => typeof q === 'string' ? q : q.toString());
+
+        let subscriptionId = '';
+        const attempts = this.realtime.subscriptions.size + 1;
+        for (let i = 0; i < attempts; i++) {
+            const candidate = ID.unique();
+            if (!this.realtime.subscriptions.has(candidate)) {
+                subscriptionId = candidate;
+                break;
+            }
+        }
+        if (subscriptionId === '') {
+            throw new {{spec.title | caseUcfirst}}Exception('Failed to generate unique subscription id');
+        }
+        this.realtime.subscriptions.set(subscriptionId, {
+            channels: channelStrings,
+            queries: queryStrings,
             callback
+        });
+        this.realtime.pendingSubscribes.set(subscriptionId, {
+            subscriptionId,
+            channels: channelStrings,
+            queries: queryStrings
         });
 
         this.realtime.connect();
 
         return () => {
-            this.realtime.subscriptions.delete(counter);
-            this.realtime.cleanUp(channelArray);
+            this.realtime.subscriptions.delete(subscriptionId);
+            this.realtime.pendingSubscribes.delete(subscriptionId);
+            const stillUsed = new Set<string>();
+            this.realtime.subscriptions.forEach(sub => {
+                sub.channels.forEach(channel => stillUsed.add(channel));
+            });
+            this.realtime.channels.forEach(channel => {
+                if (!stillUsed.has(channel)) {
+                    this.realtime.channels.delete(channel);
+                }
+            });
             this.realtime.connect();
         }
     }
@@ -601,7 +786,7 @@ class Client {
         } else {
             switch (headers['content-type']) {
                 case 'application/json':
-                    options.body = JSON.stringify(params);
+                    options.body = JSONbig.stringify(params);
                     break;
 
                 case 'multipart/form-data':
@@ -703,7 +888,7 @@ class Client {
         }
 
         if (response.headers.get('content-type')?.includes('application/json')) {
-            data = await response.json();
+            data = JSONbig.parse(await response.text());
         } else if (responseType === 'arrayBuffer') {
             data = await response.arrayBuffer();
         } else {
@@ -715,7 +900,7 @@ class Client {
         if (400 <= response.status) {
             let responseText = '';
             if (response.headers.get('content-type')?.includes('application/json') || responseType === 'arrayBuffer') {
-                responseText = JSON.stringify(data);
+                responseText = JSONbig.stringify(data);
             } else {
                 responseText = data?.message;
             }
@@ -727,6 +912,10 @@ class Client {
         if (typeof window !== 'undefined' && window.localStorage && cookieFallback) {
             window.console.warn('{{spec.title | caseUcfirst}} is using localStorage for session management. Increase your security by adding a custom domain as your API endpoint.');
             window.localStorage.setItem('cookieFallback', cookieFallback);
+        }
+
+        if (data && typeof data === 'object') {
+            data.toString = () => JSONbig.stringify(data);
         }
 
         return data;
